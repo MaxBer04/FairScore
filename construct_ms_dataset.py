@@ -27,6 +27,8 @@ def main():
     args.timestep_respacing = "100"
 
     dist_util.setup_dist()
+    
+    loss_fn = lpips.LPIPS(net='vgg').to(dist_util.dev())
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
@@ -64,7 +66,6 @@ def main():
     
     # Compute minority score
     print("computing minority score of given data...")
-    loss_fn = lpips.LPIPS(net='vgg').to(dist_util.dev())
     ms_list = []
     
     perturb_t = args.perturb_t
