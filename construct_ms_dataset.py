@@ -148,7 +148,7 @@ def create_argparser():
         batch_size=10,
         num_workers=4,
         use_ddim=False,
-        model_path="data/lsun-bedrooms/pretrained_model/lsun_bedroom.pt",
+        model_path="data/lsun-bedrooms/pretrained-model/lsun_bedroom.pt",
         data_dir="data/lsun-bedrooms/images",
         output_dir="data/lsun-bedrooms/out",
         ms_compute_only=False,
