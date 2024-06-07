@@ -29,9 +29,7 @@ conda create -n mg python=3.11.4
 conda activate mg
 pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu117
 conda install -c conda-forge mpi4py mpich
-pip install lpips
-pip install blobfile
-pip install scikit-learn
+pip install lpips blobfile scikit-learn pyarrow pandas
 ```
 
 
