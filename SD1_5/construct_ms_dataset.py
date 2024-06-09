@@ -64,10 +64,9 @@ def compute_minority_scores(args, dataset, pipe, loss_fn):
             image_losses = th.zeros(args.n_iter)
             reconstructed_images = []
 
-            print(pipe._num_timesteps)
             for i in range(args.n_iter):
                 latents = pipe.vae.encode(image).latent_dist.sample().detach() 
-                timestep = 50#int(0.9 * pipe.scheduler.config.num_train_timesteps)
+                timestep = 900#int(0.9 * pipe.scheduler.config.num_train_timesteps)
                 timesteps = th.tensor([timestep], dtype=th.long).to(dist_util.dev())
                 noise = th.randn_like(latents)
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
