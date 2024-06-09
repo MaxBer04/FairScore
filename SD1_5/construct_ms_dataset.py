@@ -1,107 +1,138 @@
 import argparse
 import os
 import sys
-
 import numpy as np
 import torch as th
+from torchvision.utils import save_image, make_grid
+from torchvision.transforms import ToTensor
+from diffusers import StableDiffusionPipeline
+from tqdm import tqdm
+from PIL import Image
+import lpips
+from sklearn.model_selection import train_test_split
+from mpi4py import MPI
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, '..'))
+sys.path.insert(0, project_root)
 
 from guided_diffusion import dist_util
-from guided_diffusion.script_util import (
-    model_and_diffusion_defaults,
-    create_model_and_diffusion,
-    add_dict_to_argparser,
-    args_to_dict,
-)
 
-from guided_diffusion.image_datasets import _list_image_files_recursively, ImageDataset
-import blobfile as bf
-from torch.utils.data import DataLoader
-import lpips
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from torchvision.utils import save_image
+class OccupationDataset(th.utils.data.Dataset):
+    def __init__(self, data_dir):
+        self.data_dir = os.path.join(script_dir, data_dir)
+        self.occupations = [d for d in os.listdir(self.data_dir) if os.path.isdir(os.path.join(self.data_dir, d))]
+        self.image_files = []
+        self.prompts = []
+        
+        for occupation in self.occupations:
+            occ_dir = os.path.join(self.data_dir, occupation)
+            image_files = sorted(f for f in os.listdir(occ_dir) if f.endswith(".png"))
+            self.image_files.extend(os.path.join(occ_dir, f) for f in image_files)
+            
+            with open(os.path.join(occ_dir, "prompts_0.csv"), "r") as f:
+                f.readline()  # Skip header
+                for line in f:
+                    _, normal_prompt, _ = line.strip().split(",")
+                    self.prompts.append(normal_prompt)
+    
+    def __len__(self):
+        return len(self.image_files)
+    
+    def __getitem__(self, idx):
+        image_file = self.image_files[idx]
+        prompt = self.prompts[idx]
+        image = Image.open(image_file).convert("RGB")
+        return image, prompt
 
-from diffusers import StableDiffusionPipeline
+
+def compute_minority_scores(args, dataset, pipe, loss_fn):
+    ms_list = []
+    to_tensor = ToTensor()
+
+    with th.no_grad():
+        for index, (image, prompt) in enumerate(tqdm(dataset)):
+            if MPI.COMM_WORLD.Get_rank() != index % MPI.COMM_WORLD.Get_size():
+                continue
+
+            image = to_tensor(image).unsqueeze(0).to(dist_util.dev())
+            
+            # Tokenize the prompt and convert it to a tensor
+            prompt_input = pipe.tokenizer(prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            prompt_input = {k: v.to(dist_util.dev()) for k, v in prompt_input.items()}
+
+            image_losses = th.zeros(args.n_iter)
+            reconstructed_images = []
+
+            print(pipe._num_timesteps)
+            for i in range(args.n_iter):
+                latents = pipe.vae.encode(image).latent_dist.sample().detach() 
+                timestep = 50#int(0.9 * pipe.scheduler.config.num_train_timesteps)
+                timesteps = th.tensor([timestep], dtype=th.long).to(dist_util.dev())
+                noise = th.randn_like(latents)
+                noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
+                
+                # Pass the tokenized prompt to the text encoder
+                denoised_image = pipe(prompt, latents=noisy_latents).images[0]
+                denoised_image = to_tensor(denoised_image).unsqueeze(0).to(dist_util.dev())
+                #model_output = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=pipe.text_encoder(**prompt_input)[0]).sample
+                
+                #denoised_image = pipe.vae.decode(model_output).sample
+
+                LPIPS_loss = loss_fn(image, denoised_image)
+                image_losses[i] = LPIPS_loss.item()
+                reconstructed_images.append(denoised_image)
+
+            ms_list.append(image_losses.mean())
+            # Save the original image and reconstructed images side by side
+            reconstructed_images = th.cat([image] + reconstructed_images, dim=0)
+            grid = make_grid(reconstructed_images, nrow=args.n_iter+1)
+            grid = (grid * 0.5 + 0.5).clamp_(0.0, 1.0)
+            save_image(grid, os.path.join(args.output_dir, f'reconstructed_{index}.png'))
+
+    return ms_list
 
 def main():
     args = create_argparser().parse_args()
-    # settle the total number of step as 100
-    args.timestep_respacing = "100"
 
     dist_util.setup_dist()
     
     loss_fn = lpips.LPIPS(net='vgg').to(dist_util.dev())
 
-    print("creating model and diffusion...")
+    print("Loading Stable Diffusion model...")
     model_id = "runwayml/stable-diffusion-v1-5"
     pipe = StableDiffusionPipeline.from_pretrained(model_id)
     pipe = pipe.to(dist_util.dev())
     if args.use_fp16:
         pipe = pipe.to(torch_dtype=th.float16)
-    
-    print("create data...")
-    
-    
-    
-    print("creating data loader...")
 
-    all_files = _list_image_files_recursively(args.data_dir)
-    classes = None
-    if args.class_cond:
-        # Assume classes are the first part of the filename,
-        # before an underscore.
-        class_names = [bf.basename(path).split("_")[0] for path in all_files]
-        sorted_classes = {x: i for i, x in enumerate(sorted(set(class_names)))}
-        classes = [sorted_classes[x] for x in class_names]
-        
-    dataset = ImageDataset(
-        args.image_size,
-        all_files,
-        classes=classes,
-        random_crop=False,
-        random_flip=False,
-    )
-    loader = DataLoader(
-                dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, drop_last=False
-            )
+    print("Creating dataset...")
+    dataset = OccupationDataset(args.data_dir)
     
-    # Compute minority score
-    print("computing minority score of given data...")
-    ms_list = []
-    
-    perturb_t = args.perturb_t
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        os.makedirs(args.output_dir, exist_ok=True)
 
-    with th.no_grad():
-        for batch in tqdm(loader):
-            batch = batch[0].to(dist_util.dev())
-            batch_losses = th.zeros(len(batch), args.n_iter)
-            t = (perturb_t * th.ones((len(batch), ))).long().to(dist_util.dev())
-            for i in range(args.n_iter):
-                batch_per = diffusion.q_sample(batch, t)
-                batch_recon = diffusion.p_mean_variance(model, batch_per.to(dist_util.dev()), t.to(dist_util.dev()))['pred_xstart'].to(dist_util.dev())
-                LPIPS_loss = loss_fn(batch.to(dist_util.dev()), batch_recon.to(dist_util.dev()))
-                batch_losses[:, i] = LPIPS_loss.view(-1)
-            ms_list.append(batch_losses.mean(axis=1))
+    print("Computing minority scores and saving reconstructions...")
+    ms_list = compute_minority_scores(args, dataset, pipe, loss_fn)
 
-    ms = th.cat(ms_list).cpu()
-    os.makedirs(args.output_dir, exist_ok=True)
-    th.save(ms, os.path.join(args.output_dir, 'ms_values.pt'))
-    
+    ms = th.tensor(ms_list).cpu()
+
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        th.save(ms, os.path.join(args.output_dir, 'ms_values.pt'))
+
     if args.ms_compute_only:
-        print("minority score computation done")
+    #    dist_util.barrier()
+        print("Minority score computation and image reconstruction complete")
         sys.exit()
-    
-    print("constructing dataset labeled with minority scores...")
-    
+
+    print("Constructing dataset labeled with minority scores...")
+
     q_th = th.zeros(args.num_m_classes)
-    
-    # construct quantile-based thresholds
     for i in range(len(q_th)):
         q_th[i] = th.quantile(ms, 1 / args.num_m_classes * (i+1))
-        
-    ms_labels = th.zeros_like(ms).long()
     
-    # labeling
+    ms_labels = th.zeros_like(ms).long()
+
     for i in range(len(ms)):
         current = ms[i]
         for j in range(len(q_th)):
@@ -112,58 +143,47 @@ def main():
                 if current > q_th[j-1] and current <= q_th[j]:
                     ms_labels[i] = j
 
-    # saving data
     data_indices = th.arange(len(ms_labels))
-    train_indicies, val_indices, y_train, y_val = train_test_split(data_indices, ms_labels, test_size=args.val_ratio, stratify=ms_labels)
-    train_indicies.shape, val_indices.shape, y_train.shape, y_val.shape
-    
-    output_path_train = os.path.join(args.output_dir, "train")
-    output_path_val = os.path.join(args.output_dir, "val")
-    os.makedirs(output_path_train, exist_ok=True)
-    os.makedirs(output_path_val, exist_ok=True)
-    
-    save_loader = DataLoader(
-        dataset, batch_size=1, shuffle=False, num_workers=1, drop_last=False
-    )
+    train_indices, val_indices, y_train, y_val = train_test_split(data_indices, ms_labels, test_size=args.val_ratio, stratify=ms_labels)
 
-    for index, batch in enumerate(tqdm(save_loader)):
-        data = batch[0]
-        file_name = all_files[index].split("/")[-1]
-        
-        
-        if index in train_indicies:
-            label_index = np.where(train_indicies==index)[0].item()
+    if dist_util.get_rank() == 0:
+        output_path_train = os.path.join(args.output_dir, "train")
+        output_path_val = os.path.join(args.output_dir, "val")
+        os.makedirs(output_path_train, exist_ok=True)
+        os.makedirs(output_path_val, exist_ok=True)
+
+    for index, (image, _) in enumerate(tqdm(dataset)):
+        if dist_util.get_rank() != index % dist_util.get_world_size():
+            continue
+
+        if index in train_indices:
+            label_index = np.where(train_indices==index)[0].item()
             label = y_train[label_index]
-            data = (data * 0.5 + 0.5).clamp_(0.0, 1.0)
-            # attach minority-score-labels in front of filenames
-            save_image(data, os.path.join(output_path_train, f'{label:04d}_' + file_name))
+            image = (image * 0.5 + 0.5).clamp_(0.0, 1.0)
+            save_image(image, os.path.join(output_path_train, f'{label:04d}_{index}.png'))
         else:
             label_index = np.where(val_indices==index)[0].item()
             label = y_val[label_index]
-            data = (data * 0.5 + 0.5).clamp_(0.0, 1.0)
-            # attach minority-score-labels in front of filenames
-            save_image(data, os.path.join(output_path_val, f'{label:04d}_' + file_name))
-            
+            image = (image * 0.5 + 0.5).clamp_(0.0, 1.0)
+            save_image(image, os.path.join(output_path_val, f'{label:04d}_{index}.png'))
+
+    dist_util.barrier()
+    print("Dataset construction complete")
+
 def create_argparser():
     defaults = dict(
-        clip_denoised=True,
-        batch_size=10,
-        num_workers=4,
-        use_ddim=False,
-        model_path="data/lsun-bedrooms/pretrained-model/lsun_bedroom.pt",
-        data_dir="data/lsun-bedrooms/images",
-        output_dir="data/lsun-bedrooms/out",
+        use_fp16=True,
+        data_dir="dataset",
+        output_dir="out",
         ms_compute_only=False,
         val_ratio=0.05,
         n_iter=5,
         num_m_classes=100,
-        perturb_t=60
     )
-    defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
-    add_dict_to_argparser(parser, defaults)
+    for k, v in defaults.items():
+        parser.add_argument(f"--{k}", default=v, type=type(v))
     return parser
-
 
 if __name__ == "__main__":
     main()
