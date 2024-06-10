@@ -11,6 +11,7 @@ from PIL import Image
 import lpips
 from sklearn.model_selection import train_test_split
 from mpi4py import MPI
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import retrieve_timesteps
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
@@ -58,15 +59,17 @@ def compute_minority_scores(args, dataset, pipe, loss_fn):
             image = to_tensor(image).unsqueeze(0).to(dist_util.dev())
             
             # Tokenize the prompt and convert it to a tensor
-            prompt_input = pipe.tokenizer(prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length, truncation=True, return_tensors="pt")
-            prompt_input = {k: v.to(dist_util.dev()) for k, v in prompt_input.items()}
+            #prompt_input = pipe.tokenizer(prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            #prompt_input = {k: v.to(dist_util.dev()) for k, v in prompt_input.items()}
 
             image_losses = th.zeros(args.n_iter)
             reconstructed_images = []
+            
+            latents = pipe.vae.encode(image).latent_dist.sample().detach()
+            latents = latents * pipe.vae.config.scaling_factor
 
             for i in range(args.n_iter):
-                latents = pipe.vae.encode(image).latent_dist.sample().detach() 
-                timestep = 900#int(0.9 * pipe.scheduler.config.num_train_timesteps)
+                timestep = 600#int(0.9 * pipe.scheduler.config.num_train_timesteps)
                 timesteps = th.tensor([timestep], dtype=th.long).to(dist_util.dev())
                 noise = th.randn_like(latents)
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
@@ -83,11 +86,12 @@ def compute_minority_scores(args, dataset, pipe, loss_fn):
                 reconstructed_images.append(denoised_image)
 
             ms_list.append(image_losses.mean())
+            print(ms_list)
             # Save the original image and reconstructed images side by side
             reconstructed_images = th.cat([image] + reconstructed_images, dim=0)
             grid = make_grid(reconstructed_images, nrow=args.n_iter+1)
-            grid = (grid * 0.5 + 0.5).clamp_(0.0, 1.0)
-            save_image(grid, os.path.join(args.output_dir, f'reconstructed_{index}.png'))
+            #grid = (grid * 0.5 + 0.5).clamp_(0.0, 1.0)
+            save_image(grid, os.path.join(script_dir, args.output_dir, f'reconstructed_{index}.png'))
 
     return ms_list
 
@@ -109,7 +113,7 @@ def main():
     dataset = OccupationDataset(args.data_dir)
     
     if MPI.COMM_WORLD.Get_rank() == 0:
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(os.path.join(script_dir, args.output_dir), exist_ok=True)
 
     print("Computing minority scores and saving reconstructions...")
     ms_list = compute_minority_scores(args, dataset, pipe, loss_fn)
@@ -117,7 +121,7 @@ def main():
     ms = th.tensor(ms_list).cpu()
 
     if MPI.COMM_WORLD.Get_rank() == 0:
-        th.save(ms, os.path.join(args.output_dir, 'ms_values.pt'))
+        th.save(ms, os.path.join(script_dir, args.output_dir, 'ms_values.pt'))
 
     if args.ms_compute_only:
     #    dist_util.barrier()
@@ -146,8 +150,8 @@ def main():
     train_indices, val_indices, y_train, y_val = train_test_split(data_indices, ms_labels, test_size=args.val_ratio, stratify=ms_labels)
 
     if dist_util.get_rank() == 0:
-        output_path_train = os.path.join(args.output_dir, "train")
-        output_path_val = os.path.join(args.output_dir, "val")
+        output_path_train = os.path.join(script_dir, args.output_dir, "train")
+        output_path_val = os.path.join(script_dir, args.output_dir, "val")
         os.makedirs(output_path_train, exist_ok=True)
         os.makedirs(output_path_val, exist_ok=True)
 
@@ -173,8 +177,8 @@ def create_argparser():
     defaults = dict(
         use_fp16=True,
         data_dir="dataset",
-        output_dir="out",
-        ms_compute_only=False,
+        output_dir="out-2",
+        ms_compute_only=True,
         val_ratio=0.05,
         n_iter=5,
         num_m_classes=100,

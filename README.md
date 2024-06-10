@@ -13,6 +13,10 @@ git clone https://github.com/soobin-um/minority-guidance
 cd minority-guidance
 ```
 
+```
+python SD1_5/construct_ms_dataset.py --data_dir dataset --output_dir out --n_iter 5 --use_fp16 True --ms_compute_only True
+```
+
 ### 2) Install dependencies
 Here's a summary of the dependencies you'll need to install:
 - Python 3.11
