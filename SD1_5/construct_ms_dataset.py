@@ -10,14 +10,29 @@ from tqdm import tqdm
 from PIL import Image
 import lpips
 from sklearn.model_selection import train_test_split
-from mpi4py import MPI
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import retrieve_timesteps
+from accelerate import Accelerator
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
 sys.path.insert(0, project_root)
 
-from guided_diffusion import dist_util
+def read_csv_with_commas(file_path, occupation):
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+
+    prompts = []
+    comma_count = occupation.count(",")
+    for line in lines:
+        parts = line.strip().split(",")
+        if comma_count == 0:
+            image_id, normal_prompt, sensitive_prompt = parts
+        else:
+            image_id = parts[0]
+            normal_prompt = ",".join(parts[1:comma_count+2]).strip()
+            sensitive_prompt = ",".join(parts[comma_count+2:]).strip()
+        prompts.append((normal_prompt, sensitive_prompt))
+
+    return prompts
 
 class OccupationDataset(th.utils.data.Dataset):
     def __init__(self, data_dir):
@@ -26,105 +41,102 @@ class OccupationDataset(th.utils.data.Dataset):
         self.image_files = []
         self.prompts = []
         
-        for occupation in self.occupations:
+        for idx, occupation in enumerate(self.occupations):
             occ_dir = os.path.join(self.data_dir, occupation)
             image_files = sorted(f for f in os.listdir(occ_dir) if f.endswith(".png"))
             self.image_files.extend(os.path.join(occ_dir, f) for f in image_files)
             
-            with open(os.path.join(occ_dir, "prompts_0.csv"), "r") as f:
-                f.readline()  # Skip header
-                for line in f:
-                    _, normal_prompt, _ = line.strip().split(",")
-                    self.prompts.append(normal_prompt)
+            prompts = read_csv_with_commas(os.path.join(occ_dir, "prompts.csv"), occupation)
+            self.prompts.extend(prompts)
     
     def __len__(self):
         return len(self.image_files)
     
     def __getitem__(self, idx):
         image_file = self.image_files[idx]
-        prompt = self.prompts[idx]
+        prompt, _ = self.prompts[idx]
         image = Image.open(image_file).convert("RGB")
         return image, prompt
 
+def collate_fn(batch):
+    images = [item[0] for item in batch]
+    prompts = [item[1] for item in batch]
+    images = th.stack([ToTensor()(image) for image in images])
+    return images, prompts
 
-def compute_minority_scores(args, dataset, pipe, loss_fn):
+def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
     ms_list = []
-    to_tensor = ToTensor()
+
+    dataloader = th.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
 
     with th.no_grad():
-        for index, (image, prompt) in enumerate(tqdm(dataset)):
-            if MPI.COMM_WORLD.Get_rank() != index % MPI.COMM_WORLD.Get_size():
+        for batch_idx, (images, prompts) in enumerate(tqdm(dataloader)):
+            if accelerator.process_index != batch_idx % accelerator.num_processes:
                 continue
 
-            image = to_tensor(image).unsqueeze(0).to(dist_util.dev())
-            
-            # Tokenize the prompt and convert it to a tensor
-            #prompt_input = pipe.tokenizer(prompt, padding="max_length", max_length=pipe.tokenizer.model_max_length, truncation=True, return_tensors="pt")
-            #prompt_input = {k: v.to(dist_util.dev()) for k, v in prompt_input.items()}
+            # Konvertiere die Bilder in den richtigen Datentyp
+            images = images.to(accelerator.device, dtype=pipe.vae.encoder.conv_in.bias.dtype)
 
-            image_losses = th.zeros(args.n_iter)
-            reconstructed_images = []
-            
-            latents = pipe.vae.encode(image).latent_dist.sample().detach()
+            batch_losses = th.zeros(len(images), args.n_iter, device=accelerator.device)
+            reconstructed_images = th.zeros(len(images) * (args.n_iter + 1), 3, images.shape[-2], images.shape[-1], device=accelerator.device)
+            reconstructed_images[:len(images)] = images
+
+            latents = pipe.vae.encode(images).latent_dist.sample().detach()
             latents = latents * pipe.vae.config.scaling_factor
 
             for i in range(args.n_iter):
-                timestep = 600#int(0.9 * pipe.scheduler.config.num_train_timesteps)
-                timesteps = th.tensor([timestep], dtype=th.long).to(dist_util.dev())
+                timestep = int(0.6 * pipe.scheduler.config.num_train_timesteps)
+                timesteps = th.tensor([timestep] * len(images), dtype=th.long, device=accelerator.device)
                 noise = th.randn_like(latents)
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
-                
-                # Pass the tokenized prompt to the text encoder
-                denoised_image = pipe(prompt, latents=noisy_latents).images[0]
-                denoised_image = to_tensor(denoised_image).unsqueeze(0).to(dist_util.dev())
-                #model_output = pipe.unet(noisy_latents, timesteps, encoder_hidden_states=pipe.text_encoder(**prompt_input)[0]).sample
-                
-                #denoised_image = pipe.vae.decode(model_output).sample
 
-                LPIPS_loss = loss_fn(image, denoised_image)
-                image_losses[i] = LPIPS_loss.item()
-                reconstructed_images.append(denoised_image)
+                denoised_images = pipe(prompts, latents=noisy_latents).images
+                denoised_images = th.stack([ToTensor()(img) for img in denoised_images]).to(accelerator.device)
 
-            ms_list.append(image_losses.mean())
-            print(ms_list)
-            # Save the original image and reconstructed images side by side
-            reconstructed_images = th.cat([image] + reconstructed_images, dim=0)
-            grid = make_grid(reconstructed_images, nrow=args.n_iter+1)
-            #grid = (grid * 0.5 + 0.5).clamp_(0.0, 1.0)
-            save_image(grid, os.path.join(script_dir, args.output_dir, f'reconstructed_{index}.png'))
+                LPIPS_loss = loss_fn(images, denoised_images)
+                batch_losses[:, i] = LPIPS_loss.view(-1)
+                reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
 
+            ms_list.append(batch_losses.mean(dim=1))
+
+            if accelerator.is_main_process and batch_idx % args.visual_check_interval == 0:
+                grid = make_grid(reconstructed_images, nrow=args.n_iter + 1)
+                save_image(grid, os.path.join(script_dir, args.output_dir, f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
+
+    ms_list = th.cat(ms_list)
     return ms_list
 
 def main():
     args = create_argparser().parse_args()
 
-    dist_util.setup_dist()
-    
-    loss_fn = lpips.LPIPS(net='vgg').to(dist_util.dev())
+    accelerator = Accelerator()
+    print(f"Using {accelerator.num_processes} GPUs.")
+
+    loss_fn = lpips.LPIPS(net='vgg').to(accelerator.device)
 
     print("Loading Stable Diffusion model...")
-    model_id = "runwayml/stable-diffusion-v1-5"
-    pipe = StableDiffusionPipeline.from_pretrained(model_id)
-    pipe = pipe.to(dist_util.dev())
-    if args.use_fp16:
-        pipe = pipe.to(torch_dtype=th.float16)
-
+    model_id = args.model_id
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if args.use_fp16 else th.float32)
+    
+    pipe = pipe.to(accelerator.device)
+    if not accelerator.is_main_process:
+        pipe.set_progress_bar_config(disable=True)
+        
     print("Creating dataset...")
     dataset = OccupationDataset(args.data_dir)
     
-    if MPI.COMM_WORLD.Get_rank() == 0:
+    if accelerator.is_main_process:
         os.makedirs(os.path.join(script_dir, args.output_dir), exist_ok=True)
 
     print("Computing minority scores and saving reconstructions...")
-    ms_list = compute_minority_scores(args, dataset, pipe, loss_fn)
+    ms_list = compute_minority_scores(args, dataset, pipe, loss_fn, accelerator)
 
-    ms = th.tensor(ms_list).cpu()
+    ms = accelerator.gather(ms_list)
 
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        th.save(ms, os.path.join(script_dir, args.output_dir, 'ms_values.pt'))
+    if accelerator.is_main_process:
+        th.save(ms.cpu(), os.path.join(script_dir, args.output_dir, 'ms_values.pt'))
 
     if args.ms_compute_only:
-    #    dist_util.barrier()
         print("Minority score computation and image reconstruction complete")
         sys.exit()
 
@@ -149,14 +161,14 @@ def main():
     data_indices = th.arange(len(ms_labels))
     train_indices, val_indices, y_train, y_val = train_test_split(data_indices, ms_labels, test_size=args.val_ratio, stratify=ms_labels)
 
-    if dist_util.get_rank() == 0:
+    if accelerator.is_main_process:
         output_path_train = os.path.join(script_dir, args.output_dir, "train")
         output_path_val = os.path.join(script_dir, args.output_dir, "val")
         os.makedirs(output_path_train, exist_ok=True)
         os.makedirs(output_path_val, exist_ok=True)
 
     for index, (image, _) in enumerate(tqdm(dataset)):
-        if dist_util.get_rank() != index % dist_util.get_world_size():
+        if accelerator.process_index != index % accelerator.num_processes:
             continue
 
         if index in train_indices:
@@ -170,18 +182,21 @@ def main():
             image = (image * 0.5 + 0.5).clamp_(0.0, 1.0)
             save_image(image, os.path.join(output_path_val, f'{label:04d}_{index}.png'))
 
-    dist_util.barrier()
+    accelerator.wait_for_everyone()
     print("Dataset construction complete")
 
 def create_argparser():
     defaults = dict(
+        batch_size=20,
         use_fp16=True,
-        data_dir="dataset",
-        output_dir="out-2",
+        data_dir="dataset_2",
+        output_dir="dataset_2_ms",
+        model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=True,
         val_ratio=0.05,
         n_iter=5,
-        num_m_classes=100,
+        num_m_classes=2,
+        visual_check_interval=1
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
