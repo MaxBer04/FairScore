@@ -9,7 +9,10 @@ from tqdm import tqdm
 from diffusers import StableDiffusionPipeline
 from accelerate import Accelerator
 from accelerate.utils import gather_object
-from torchvision.transforms import functional as F
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
@@ -48,6 +51,24 @@ def save_dataset(dataset, output_dir, image_counter):
     
     return image_counter
 
+def save_batch(batch_dataset, output_dir, image_counter):
+    for occupation, data in batch_dataset.items():
+        if len(data["images"]) > 0:
+            occ_dir = os.path.join(output_dir, occupation)
+            os.makedirs(occ_dir, exist_ok=True)
+            
+            # Speichere Bilder
+            for img in data["images"]:
+                img.save(os.path.join(occ_dir, f"{image_counter}.png"))
+                image_counter += 1
+            
+            # Speichere Prompts in einer CSV-Datei
+            with open(os.path.join(occ_dir, "prompts.csv"), "a") as f:
+                for i in range(len(data["images"])):
+                    f.write(f"{image_counter - len(data['images']) + i},{data['normal_prompts'][i]},{data['sensitive_prompts'][i]}\n")
+    
+    return image_counter
+
 def main():
     args = create_argparser().parse_args()
     
@@ -71,6 +92,7 @@ def main():
     
     # Konfiguriere den Logger mit dem angegebenen Output-Verzeichnis
     logger.configure(dir=output_dir, format_strs=["log"])  # Nur die log.txt Datei
+    console = Console()
 
     logger.log("Loading Stable Diffusion model...")
     model_id = args.model_id
@@ -86,7 +108,14 @@ def main():
     
     # Initialisiere den Fortschrittsbalken
     total_images = args.num_samples * len(occupations)
-    progress_bar = tqdm(total=total_images, desc="Generating images", disable=not accelerator.is_local_main_process)
+    progress_bar = Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+        console=console
+    )
+    generate_task = progress_bar.add_task("Generating images", total=total_images)
 
     # Verteile die Occupations auf die verfügbaren GPUs
     with accelerator.split_between_processes(occupations) as local_occupations:
@@ -99,23 +128,33 @@ def main():
             for batch_start in range(0, args.num_samples, args.batch_size):
                 batch_size = min(args.batch_size, args.num_samples - batch_start)
                 normal_prompts, sensitive_prompts = generate_prompts(occupation, batch_size)
-                
+
                 # Move prompts to device
                 sensitive_prompts = [prompt.replace("<", "").replace(">", "") for prompt in sensitive_prompts]
-                
+
                 with th.no_grad():
-                    images = pipe(sensitive_prompts, num_inference_steps=50, guidance_scale=7.5).images
+                    if accelerator.is_main_process:
+                        images = pipe(sensitive_prompts, num_inference_steps=50, guidance_scale=7.5).images
+                    else:
+                        images = pipe(sensitive_prompts, num_inference_steps=50, guidance_scale=7.5, progress_bar=False).images
 
                 for img, normal_prompt, sensitive_prompt in zip(images, normal_prompts, sensitive_prompts):
                     dataset[occupation]["images"].append(img)
                     dataset[occupation]["sensitive_prompts"].append(sensitive_prompt)
                     dataset[occupation]["normal_prompts"].append(normal_prompt)
-                
-                progress_bar.update(batch_size*accelerator.num_processes)
 
-    progress_bar.close()
+                progress_bar.update(generate_task, advance=batch_size*accelerator.num_processes)
 
-    accelerator.wait_for_everyone()
+                # Speichere den aktuellen Batch und gebe den Speicher frei
+                image_counter = save_batch(dataset, output_dir, image_counter)
+                dataset = {occ: {"images": [], "sensitive_prompts": [], "normal_prompts": []} for occ in local_occupations}
+                accelerator.free_memory()
+
+    if accelerator.is_main_process:
+        progress_bar.stop()
+        console.print(Panel("[bold green]Image generation completed[/bold green]"))
+
+    """     accelerator.wait_for_everyone()
     gathered_dataset = gather_object([dataset])
     if accelerator.is_main_process:
         custom_dict = {}
@@ -127,7 +166,7 @@ def main():
                 custom_dict[occupation]["images"].extend(data["images"])
                 custom_dict[occupation]["sensitive_prompts"].extend(data["sensitive_prompts"])
                 custom_dict[occupation]["normal_prompts"].extend(data["normal_prompts"])
-        image_counter = save_dataset(custom_dict, output_dir, image_counter)
+        image_counter = save_dataset(custom_dict, output_dir, image_counter) """
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
