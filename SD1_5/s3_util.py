@@ -39,7 +39,7 @@ def main():
     parser.add_argument('--dataset_dir', default='dataset_2', help='Directory containing the dataset')
     parser.add_argument('--compressed_file', default='compressed_dataset', help='Name of the compressed file')
     parser.add_argument('--bucket_name', help='Name of the S3 bucket')
-    parser.add_argument('--credentials_file', default='../aws_accessKeys.csv', help='Path to the AWS credentials CSV file')
+    parser.add_argument('--credentials_file', default='aws_accessKeys.csv', help='Path to the AWS credentials CSV file')
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
