@@ -78,6 +78,7 @@ def main():
     
     # Move the model to device before preparing
     pipe = pipe.to(accelerator.device)
+    #if not accelerator.is_main_process:
     pipe.set_progress_bar_config(disable=True)
 
     # Verteile das Modell auf die verfügbaren GPUs
@@ -134,8 +135,8 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        num_samples=12,  # Pro Occupation
-        batch_size=12,
+        num_samples=300,  # Pro Occupation
+        batch_size=300,
         use_fp16=True,
         seed="",
         output_dir="dataset_2",
