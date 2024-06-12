@@ -41,6 +41,7 @@ class OccupationDataset(th.utils.data.Dataset):
         self.occupations = [d for d in os.listdir(self.data_dir) if os.path.isdir(os.path.join(self.data_dir, d))][:num_occupations]
         self.image_files = []
         self.prompts = []
+        self.indices = []
         
         for idx, occupation in enumerate(self.occupations):
             occ_dir = os.path.join(self.data_dir, occupation)
@@ -49,6 +50,7 @@ class OccupationDataset(th.utils.data.Dataset):
             
             prompts = read_csv_with_commas(os.path.join(occ_dir, "prompts.csv"), occupation)
             self.prompts.extend(prompts)
+            self.indices.extend(range(len(self.image_files) - len(image_files), len(self.image_files)))
     
     def __len__(self):
         return len(self.image_files)
@@ -56,29 +58,32 @@ class OccupationDataset(th.utils.data.Dataset):
     def __getitem__(self, idx):
         image_file = self.image_files[idx]
         prompt, _ = self.prompts[idx]
+        original_idx = self.indices[idx]
         image = Image.open(image_file).convert("RGB")
-        return image, prompt
+        return image, prompt, original_idx
     
     def select(self, indices):
         selected_dataset = OccupationDataset(self.data_dir)
         selected_dataset.image_files = [self.image_files[i] for i in indices]
         selected_dataset.prompts = [self.prompts[i] for i in indices]
+        selected_dataset.indices = [self.indices[i] for i in indices]
         return selected_dataset
 
 def collate_fn(batch):
     images = [item[0] for item in batch]
     prompts = [item[1] for item in batch]
+    original_indices = [item[2] for item in batch]
     images = th.stack([ToTensor()(image) for image in images])
-    return images, prompts
+    return images, prompts, original_indices
 
 
-def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
+def compute_minority_scores(args, global_dataset, local_dataset, pipe, loss_fn, accelerator):
     ms_tuples = []
 
-    dataloader = th.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+    dataloader = th.utils.data.DataLoader(local_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
     
     with th.no_grad():
-        for batch_idx, (images, prompts) in enumerate(tqdm(dataloader)):
+        for batch_idx, (images, prompts, original_indices) in enumerate(tqdm(dataloader)):
             print(f"Process: {accelerator.process_index}, {prompts[0]}")
             # Konvertiere die Bilder in den richtigen Datentyp
             images = images.to(accelerator.device, dtype=pipe.vae.encoder.conv_in.bias.dtype)
@@ -100,22 +105,63 @@ def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
                 denoised_images = pipe(prompts, latents=noisy_latents).images
                 denoised_images = th.stack([ToTensor()(img) for img in denoised_images]).to(accelerator.device)
                 denoised_images = (denoised_images * 2 - 1).clamp_(0.0, 1.0)
-                # (image_tensor * 0.5 + 0.5).clamp_(0.0, 1.0)
                 
                 LPIPS_loss = loss_fn(images, denoised_images)
                 batch_losses[:, i] = LPIPS_loss.view(-1)
                 if args.visual_check_interval:
                     reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
 
-            # Speichere statt der Bilder die Indizes
-            for idx, (prompt, score) in enumerate(zip(prompts, batch_losses.mean(dim=1))):
-                ms_tuples.append((batch_idx * args.batch_size + idx, prompt, score))
+            # Speichere die ursprünglichen Indizes zusammen mit Prompts und Scores
+            for idx, (prompt, score, original_idx) in enumerate(zip(prompts, batch_losses.mean(dim=1), original_indices)):
+                ms_tuples.append((original_idx, prompt, score))
 
-            if args.visual_check_interval and batch_idx % args.visual_check_interval == 0:
+            if args.visual_check_interval and (batch_idx + 1) % args.visual_check_interval == 0:
                 grid = make_grid(reconstructed_images, nrow=args.n_iter + 1)
                 save_image(grid, os.path.join(script_dir, args.output_dir, 'reconstructed', f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
 
+            # Überprüfe, ob alle GPUs x Occupations fertig erstellt haben
+            if (batch_idx + 1) % args.save_interval == 0:
+                # Speichere die Daten periodisch
+                save_data(args, global_dataset, ms_tuples, accelerator)
+                ms_tuples = []  # Leere die Liste, um Speicher freizugeben
+
     return ms_tuples
+
+def save_data(args, dataset, ms_tuples, accelerator):
+    gathered_ms_tuples = [tuple_ele for process in gather_object([ms_tuples]) for tuple_ele in process]
+    print(f"MS gathered list length: {len(gathered_ms_tuples)}")
+    
+    if accelerator.is_main_process:
+        # Speichere die Indizes, Prompts und Scores
+        indices = []
+        prompts = []
+        scores = []
+        for index, prompt, score in gathered_ms_tuples:
+            indices.append(index)
+            prompts.append(prompt)
+            scores.append(score.cpu().numpy())
+
+        # Lade die Bilder basierend auf den gespeicherten Indizes
+        images = [dataset[idx][0] for idx in indices]
+
+        output_path = os.path.join(script_dir, args.output_dir)
+        os.makedirs(output_path, exist_ok=True)
+
+        # Speichere die Metadaten in einer CSV-Datei
+        metadata = []
+
+        for idx, (image, prompt, score) in enumerate(zip(images, prompts, scores)):
+            image_tensor = ToTensor()(image)
+            image_filename = f'{indices[idx]}.png'  # Verwende den ursprünglichen Index als Dateinamen
+            save_image(image_tensor, os.path.join(output_path, image_filename))
+            metadata.append([indices[idx], prompt, score])
+
+        # Speichere die Metadaten in einer CSV-Datei
+        with open(os.path.join(output_path, 'metadata.csv'), 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(metadata)
+
+    accelerator.wait_for_everyone()
 
 def main():
     args = create_argparser().parse_args()
@@ -149,45 +195,17 @@ def main():
         
         print('-'*40)
         print(f"GPU{accelerator.process_index} working on {len(local_dataset)} entries")
-        ms_tuples = compute_minority_scores(args, local_dataset, pipe, loss_fn, accelerator)
+        ms_tuples = compute_minority_scores(args, dataset, local_dataset, pipe, loss_fn, accelerator)
 
-    ms_tuples = [tuple_ele for process in gather_object([ms_tuples]) for tuple_ele in process]
-    print(f"MS gathered list length: {len(ms_tuples)}")
+    # Speichere die verbleibenden Daten
+    save_data(args, dataset, ms_tuples, accelerator)
     
-    if accelerator.is_main_process:
-        # Speichere die Indizes, Prompts und Scores
-        indices, prompts, scores = zip(*ms_tuples)
-        scores = [score.cpu().numpy() for score in list(scores)]
-        indices = list(indices)
-        prompts = list(prompts)
-
-        # Lade die Bilder basierend auf den gespeicherten Indizes
-        images = [dataset[idx][0] for idx in indices]
-
-        output_path = os.path.join(script_dir, args.output_dir)
-        os.makedirs(output_path, exist_ok=True)
-
-        # Speichere die Metadaten in einer CSV-Datei
-        metadata = []
-
-        for idx, image in enumerate(images):
-            image_tensor = ToTensor()(image)
-            image_filename = f'{idx}.png'
-            save_image(image_tensor, os.path.join(output_path, image_filename))
-            metadata.append([idx, prompts[idx], scores[idx]])
-
-        # Speichere die Metadaten in einer CSV-Datei
-        with open(os.path.join(output_path, 'metadata.csv'), 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['idx', 'prompt', 'score'])
-            writer.writerows(metadata)
-
     accelerator.wait_for_everyone()
     print("Dataset construction complete")
 
 def create_argparser():
     defaults = dict(
-        batch_size=42,
+        batch_size=20,
         use_fp16=True,
         data_dir="dataset_2",
         output_dir="dataset_2_ms",
@@ -196,6 +214,7 @@ def create_argparser():
         n_iter=5,
         visual_check_interval=None,
         num_occupations=None,
+        save_interval=4,  # Füge das Argument für das Speicherintervall hinzu
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
