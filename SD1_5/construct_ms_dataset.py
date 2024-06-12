@@ -84,8 +84,9 @@ def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
             images = images.to(accelerator.device, dtype=pipe.vae.encoder.conv_in.bias.dtype)
 
             batch_losses = th.zeros(len(images), args.n_iter, device=accelerator.device)
-            reconstructed_images = th.zeros(len(images) * (args.n_iter + 1), 3, images.shape[-2], images.shape[-1], device=accelerator.device)
-            reconstructed_images[:len(images)] = images
+            if args.visual_check_interval:
+                reconstructed_images = th.zeros(len(images) * (args.n_iter + 1), 3, images.shape[-2], images.shape[-1], device=accelerator.device)
+                reconstructed_images[:len(images)] = images
 
             latents = pipe.vae.encode(images).latent_dist.sample().detach()
             latents = latents * pipe.vae.config.scaling_factor
@@ -103,7 +104,8 @@ def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
                 
                 LPIPS_loss = loss_fn(images, denoised_images)
                 batch_losses[:, i] = LPIPS_loss.view(-1)
-                reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
+                if args.visual_check_interval:
+                    reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
 
             # Speichere statt der Bilder die Indizes
             for idx, (prompt, score) in enumerate(zip(prompts, batch_losses.mean(dim=1))):
@@ -185,15 +187,15 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=25,
+        batch_size=42,
         use_fp16=True,
         data_dir="dataset_2",
         output_dir="dataset_2_ms",
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
-        n_iter=1,
-        visual_check_interval=4,
-        num_occupations=1,
+        n_iter=5,
+        visual_check_interval=None,
+        num_occupations=None,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
