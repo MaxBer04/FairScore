@@ -66,7 +66,7 @@ def create_image_grid(args):
     combined_grid = make_grid(image_grids, nrow=1, padding=50)
 
     # Speichere das kombinierte Image Grid
-    output_file = os.path.join(args.data_dir, "image_grid.png")
+    output_file = os.path.join(script_dir, "image_grid.png")
     save_image(combined_grid, output_file)
 
 def main():
@@ -80,7 +80,7 @@ def create_argparser():
     defaults = dict(
         data_dir="dataset_2_ms",
         num_quantiles=4,
-        num_images_per_grid=40,
+        num_images_per_grid=30,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():

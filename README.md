@@ -33,9 +33,28 @@ conda create -n mg python=3.11.4
 conda activate mg
 pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu117
 conda install -c conda-forge mpi4py mpich
-pip install lpips blobfile scikit-learn pyarrow pandas transformers diffusers accelerate boto3 rich
+pip install lpips blobfile scikit-learn pyarrow pandas transformers diffusers accelerate boto3 rich facenet-pytorch matplotlib seaborn
 ```
 
+    face_rgb = face.convert('RGB')  # Konvertiere das Bild in RGB-Format
+
+    model.load_state_dict(torch.hub.load_state_dict_from_url('https://drive.google.com/uc?id=113QMzQzkBDmYMs9LwzvD-jxEZdBQ5J4X&export=download'))
+import argparse
+import os
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+import torch
+from torchvision.transforms import ToTensor
+from facenet_pytorch import MTCNN
+from torchvision import transforms
+import torch.nn.functional as F
+from tqdm import tqdm
+import torchvision
+import torch.nn as nn
 
 ## 2. Download a dataset
 LSUN-Bedrooms is a huge dataset, so downloading all of it could be painful. Instead, you may want to download a smaller version [here](https://www.kaggle.com/datasets/jhoward/lsun_bedroom) where only a piece of the dataset is provided.
