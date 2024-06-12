@@ -1,3 +1,0 @@
-Logging to /root/FairScore/SD1_5/dataset_2
-Loading Stable Diffusion model...
-Dataset creation complete
