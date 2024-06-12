@@ -217,7 +217,7 @@ def main():
 def create_argparser():
     defaults = dict(
         data_dir="dataset_2_ms",
-        output_dir="dataset_2_analysis/q-8",
+        output_dir="dataset_2_ms_analysis/q-8",
         quantiles=8,
         batch_size=640,
         visualization_steps=1,

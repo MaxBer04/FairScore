@@ -3,10 +3,7 @@ __pycache__/
 classify_image_graph_def.pb
 
 data/
-SD1_5/dataset_2_ms/
-SD1_5/dataset_2_analysis/
-SD1_5/dataset_2/
-SD1_5/dataset/
+SD1_5/**/
 SD1_5/aws_accessKeys.csv
 *.zip
 */*.zip
