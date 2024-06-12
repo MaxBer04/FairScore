@@ -98,7 +98,9 @@ def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
 
                 denoised_images = pipe(prompts, latents=noisy_latents).images
                 denoised_images = th.stack([ToTensor()(img) for img in denoised_images]).to(accelerator.device)
-
+                denoised_images = (denoised_images * 2 - 1).clamp_(0.0, 1.0)
+                # (image_tensor * 0.5 + 0.5).clamp_(0.0, 1.0)
+                
                 LPIPS_loss = loss_fn(images, denoised_images)
                 batch_losses[:, i] = LPIPS_loss.view(-1)
                 reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
@@ -107,9 +109,9 @@ def compute_minority_scores(args, dataset, pipe, loss_fn, accelerator):
             for idx, (prompt, score) in enumerate(zip(prompts, batch_losses.mean(dim=1))):
                 ms_tuples.append((batch_idx * args.batch_size + idx, prompt, score))
 
-            if batch_idx % args.visual_check_interval == 0:
+            if args.visual_check_interval and batch_idx % args.visual_check_interval == 0:
                 grid = make_grid(reconstructed_images, nrow=args.n_iter + 1)
-                save_image(grid, os.path.join(script_dir, args.output_dir, f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
+                save_image(grid, os.path.join(script_dir, args.output_dir, 'reconstructed', f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
 
     return ms_tuples
 
@@ -135,6 +137,8 @@ def main():
     
     if accelerator.is_main_process:
         os.makedirs(os.path.join(script_dir, args.output_dir), exist_ok=True)
+        if args.visual_check_interval:
+            os.makedirs(os.path.join(script_dir, args.output_dir, 'reconstructed'), exist_ok=True)
 
     accelerator.wait_for_everyone()
     accelerator.print("Computing minority scores and saving reconstructions...")
@@ -166,7 +170,6 @@ def main():
 
         for idx, image in enumerate(images):
             image_tensor = ToTensor()(image)
-            image_tensor = (image_tensor * 0.5 + 0.5).clamp_(0.0, 1.0)
             image_filename = f'{idx}.png'
             save_image(image_tensor, os.path.join(output_path, image_filename))
             metadata.append([idx, prompts[idx], scores[idx]])
@@ -190,7 +193,7 @@ def create_argparser():
         ms_compute_only=False,
         n_iter=1,
         visual_check_interval=4,
-        num_occupations=2,
+        num_occupations=1,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
