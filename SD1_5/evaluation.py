@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from PIL import Image, ImageDraw
 import torch
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToPILImage
 from facenet_pytorch import MTCNN
 from torchvision import transforms
 import torch.nn.functional as F
@@ -25,7 +25,16 @@ def load_image(data_dir, idx):
     return Image.open(image_file)
 
 def detect_faces(image, mtcnn):
-    return mtcnn.detect(image)
+    # Konvertiere das Bild in ein RGB-Bild
+    image = image.convert('RGB')
+    
+    # Erkenne Gesichter im Bild und erhalte die Bounding Boxes
+    boxes, _ = mtcnn.detect(image)
+    
+    # Extrahiere die erkannten Gesichter aus dem Bild
+    faces = mtcnn(image)
+    
+    return faces, boxes
 
 def load_fairface_model():
     model = torchvision.models.resnet34(pretrained=True)
@@ -41,7 +50,8 @@ def predict_race_gender(faces, fairface):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    face_tensors = torch.stack([transform(face.convert('RGB')) for face in faces])
+    
+    face_tensors = torch.stack([transform(ToPILImage()(face)) for face in faces])
     face_tensors = face_tensors.to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
     
     outputs = fairface(face_tensors)
@@ -89,16 +99,18 @@ def map_race_4group(races):
     }
     return [race_map[race] for race in races]
 
-
-def visualize_faces(args, batch_images, batch_boxes, step):
-    draw_images = [img.copy() for img in batch_images]
-    for img, boxes in zip(draw_images, batch_boxes):
+def visualize_faces(args, batch_images, batch_boxes, step, quantile):
+    draw_images = [img.clone() for img in batch_images]
+    for img, box in zip(draw_images, batch_boxes):
+        img = ToPILImage()(img)
         draw = ImageDraw.Draw(img)
-        for box in boxes:
-            draw.rectangle([(box[0], box[1]), (box[2], box[3])], outline=(255, 0, 0), width=2)
+        draw.rectangle([(box[0], box[1]), (box[2], box[3])], outline=(255, 0, 0), width=4)
     
     grid = make_grid(draw_images, nrow=8)
-    output_dir = os.path.join(args.output_dir, 'face_visualization')
+    if args.quantiles < 1:
+        output_dir = os.path.join(args.output_dir, 'face_visualization')
+    else:
+        output_dir = os.path.join(args.output_dir, f'face_visualization_{quantile}')
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"faces_step_{step}.png")
     save_image(grid, output_file)
@@ -107,7 +119,7 @@ def analyze_images(args, metadata, quantile=None):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    mtcnn = MTCNN(margin=40, keep_all=True, post_process=False, device=device)
+    mtcnn = MTCNN(keep_all=True, device=device)
     fairface = load_fairface_model()
     fairface.race_classes = ['White', 'Black', 'Latino_Hispanic', 'East Asian', 'Southeast Asian', 'Indian', 'Middle Eastern']
     fairface.gender_classes = ['Male', 'Female']
@@ -116,7 +128,7 @@ def analyze_images(args, metadata, quantile=None):
     gender_data = []
     race_4group_data = []
 
-    if quantile is not None:
+    if args.quantiles > 1:
         metadata = metadata[metadata['quantile'] == quantile]
 
     print(f"Analyzing images for quantile {quantile if quantile is not None else 'all'}...")
@@ -126,12 +138,20 @@ def analyze_images(args, metadata, quantile=None):
         
         batch_images = []
         batch_boxes = []
-        for idx, prompt, score in batch_metadata.values:
-            image = load_image(args.data_dir, idx)
-            faces, boxes = detect_faces(image, mtcnn)
-            if faces is not None:
-                batch_images.extend([Image.fromarray(face.astype(np.uint8)) for face in faces])
-                batch_boxes.extend([boxes])
+        if args.quantiles > 1:
+            for idx, prompt, score, quantile in batch_metadata.values:
+                image = load_image(args.data_dir, idx)
+                faces, boxes = detect_faces(image, mtcnn)
+                if faces is not None:
+                    batch_images.extend(faces)
+                    batch_boxes.extend(boxes)
+        else:
+          for idx, prompt, score in batch_metadata.values:
+              image = load_image(args.data_dir, idx)
+              faces, boxes = detect_faces(image, mtcnn)
+              if faces is not None:
+                  batch_images.extend(faces)
+                  batch_boxes.extend(boxes)
 
         if len(batch_images) > 0:
             race_preds, gender_preds, race_scores, gender_scores = predict_race_gender(batch_images, fairface)
@@ -144,7 +164,7 @@ def analyze_images(args, metadata, quantile=None):
             race_4group_data.extend(race_4groups)
 
             if (batch_start // args.batch_size) % args.visualization_steps == 0:
-                visualize_faces(args, batch_images, batch_boxes, batch_start // args.batch_size)
+                visualize_faces(args, batch_images, batch_boxes, batch_start // args.batch_size, quantile)
 
     return race_data, gender_data, race_4group_data
 
@@ -156,7 +176,7 @@ def plot_distribution(args, data, label, quantile=None):
     ax.set_ylabel('Count')
     plt.tight_layout()
     
-    if quantile is not None:
+    if args.quantiles > 1:
         output_file = os.path.join(args.output_dir, f"{label.lower()}_distribution_quantile_{quantile}.png")
     else:
         output_file = os.path.join(args.output_dir, f"{label.lower()}_distribution.png")
@@ -197,10 +217,10 @@ def main():
 def create_argparser():
     defaults = dict(
         data_dir="dataset_2_ms",
-        output_dir="dataset_2_analysis",
-        quantiles=0,
-        batch_size=32,
-        visualization_steps=40,
+        output_dir="dataset_2_analysis/q-8",
+        quantiles=8,
+        batch_size=640,
+        visualization_steps=1,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
