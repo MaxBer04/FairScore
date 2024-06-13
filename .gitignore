@@ -4,6 +4,8 @@ classify_image_graph_def.pb
 
 data/
 SD1_5/**/
+SD1_5/*.pt
+SD1_5/*.png
 SD1_5/aws_accessKeys.csv
 *.zip
 */*.zip

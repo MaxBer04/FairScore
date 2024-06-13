@@ -4,12 +4,7 @@ import shutil
 import boto3
 import csv
 
-def load_aws_credentials(csv_file):
-    with open(csv_file, 'r') as file:
-        reader = csv.reader(file)
-        next(reader)  # Überspringen der Kopfzeile
-        access_key_id, secret_access_key = next(reader)
-    return access_key_id, secret_access_key
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def compress_dataset(dataset_dir, compressed_file):
     print(f"Compressing dataset directory '{dataset_dir}' to '{compressed_file}'...")
@@ -36,16 +31,14 @@ def extract_dataset(compressed_file, dataset_dir):
 def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
-    parser.add_argument('--dataset_dir', default='dataset_2_ms_faces', help='Directory containing the dataset')
-    parser.add_argument('--compressed_file', default='ms_with_faces', help='Name of the compressed file')
+    parser.add_argument('--dataset_dir', default='d_RV2_5000_balanced_analysis', help='Directory containing the dataset')
+    parser.add_argument('--compressed_file', default='d_RV2_5000_balanced', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     parser.add_argument('--credentials_file', default='aws_accessKeys.csv', help='Path to the AWS credentials CSV file')
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    credentials_path = os.path.abspath(os.path.join(script_dir, args.credentials_file))
-
-    access_key_id, secret_access_key = load_aws_credentials(credentials_path)
+    access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
+    secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
 
     dataset_path = os.path.join(script_dir, args.dataset_dir)
 
