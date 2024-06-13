@@ -244,7 +244,6 @@ def main():
     with accelerator.split_between_processes(list(range(len(dataset)))) as dataset_idcs:
         local_dataset=dataset.select(dataset_idcs)
         
-        print('-'*40)
         print(f"GPU{accelerator.process_index} working on {len(local_dataset)} entries")
         ms_tuples = compute_minority_scores(args, dataset, local_dataset, pipe, loss_fn, accelerator)
 
@@ -256,7 +255,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=20,
+        batch_size=70,
         use_fp16=True,
         data_dir="dataset_2",
         output_dir="dataset_2_ms_faces",

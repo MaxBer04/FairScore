@@ -36,8 +36,8 @@ def extract_dataset(compressed_file, dataset_dir):
 def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
-    parser.add_argument('--dataset_dir', default='dataset_2', help='Directory containing the dataset')
-    parser.add_argument('--compressed_file', default='compressed_dataset', help='Name of the compressed file')
+    parser.add_argument('--dataset_dir', default='dataset_2_ms_faces', help='Directory containing the dataset')
+    parser.add_argument('--compressed_file', default='ms_with_faces', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     parser.add_argument('--credentials_file', default='aws_accessKeys.csv', help='Path to the AWS credentials CSV file')
     args = parser.parse_args()

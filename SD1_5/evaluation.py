@@ -216,11 +216,11 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        data_dir="dataset_2_ms",
-        output_dir="dataset_2_ms_analysis/q-8",
-        quantiles=8,
+        data_dir="dataset_2_ms_faces",
+        output_dir="ms_with_faces_analysis/q-4",
+        quantiles=4,
         batch_size=640,
-        visualization_steps=1,
+        visualization_steps=2,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
