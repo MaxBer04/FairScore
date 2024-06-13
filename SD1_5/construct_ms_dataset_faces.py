@@ -132,7 +132,7 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, loss_fn, 
             latents = latents * pipe.vae.config.scaling_factor
 
             for i in range(args.n_iter):
-                timestep = int(0.6 * pipe.scheduler.config.num_train_timesteps)
+                timestep = int(args.T_frac * pipe.scheduler.config.num_train_timesteps)
                 timesteps = th.tensor([timestep] * len(images), dtype=th.long, device=accelerator.device)
                 noise = th.randn_like(latents)
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
@@ -255,16 +255,17 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=70,
+        batch_size=30,
         use_fp16=True,
-        data_dir="dataset_2",
-        output_dir="dataset_2_ms_faces",
+        data_dir="d_RV2_5000_balanced_analysis",
+        output_dir="d_RV2_5000_balanced_analysis---06T-5it",
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
         n_iter=5,
         visual_check_interval=None,
         num_occupations=None,
         save_interval=1,  # Füge das Argument für das Speicherintervall hinzu
+        T_frac=0.6,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
