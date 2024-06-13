@@ -255,17 +255,17 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=30,
+        batch_size=128,
         use_fp16=True,
-        data_dir="d_RV2_5000_balanced_analysis",
-        output_dir="d_RV2_5000_balanced_analysis---06T-5it",
+        data_dir="dataset",
+        output_dir="output-08T-5it",
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
         n_iter=5,
         visual_check_interval=None,
         num_occupations=None,
         save_interval=1,  # Füge das Argument für das Speicherintervall hinzu
-        T_frac=0.6,
+        T_frac=0.8,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
