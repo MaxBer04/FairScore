@@ -8,13 +8,15 @@ from PIL import Image, ImageDraw
 import torch
 from facenet_pytorch import MTCNN
 from torchvision.utils import make_grid, save_image
+from tqdm import tqdm
+from math import ceil
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
 sys.path.insert(0, project_root)
 
 from utils.fairface import load_fairface_model, predict_race_gender, map_race, map_gender, map_race_4group
-from utils.visualization import visualize_faces
+from utils.visualization import visualize_images, visualize_faces
 
 def load_image(data_dir, idx):
     image_file = os.path.join(data_dir, f"{idx}.png")
@@ -46,40 +48,30 @@ def analyze_images(args, metadata, quantile=None):
     if args.quantiles > 1:
         metadata = metadata[metadata['quantile'] == quantile]
 
+    total_images = len(metadata)
+    processed_images = 0
+
     print(f"Analyzing images for quantile {quantile if quantile is not None else 'all'}...")
-    for batch_start in range(0, len(metadata), args.batch_size):
-        batch_end = min(batch_start + args.batch_size, len(metadata))
-        batch_metadata = metadata.iloc[batch_start:batch_end]
+    with tqdm(total=total_images, unit='image', desc='Analyzing', position=0, leave=True) as pbar:
+        for idx, row in metadata.iterrows():
+            image = load_image(args.data_dir, row['idx'])
+            faces, boxes = detect_faces(image, mtcnn)
+            
+            if faces is not None:
+                race_preds, gender_preds, _, _ = predict_race_gender(faces, fairface, device)
+                races = map_race(race_preds)
+                genders = map_gender(gender_preds)
+                race_4groups = map_race_4group(races)
 
-        batch_images = []
-        batch_boxes = []
-        if args.quantiles > 1:
-            for idx, prompt, score, quantile in batch_metadata.values:
-                image = load_image(args.data_dir, idx)
-                faces, boxes = detect_faces(image, mtcnn)
-                if faces is not None:
-                    batch_images.extend(faces)
-                    batch_boxes.extend(boxes)
-        else:
-            for idx, prompt, score in batch_metadata.values:
-                image = load_image(args.data_dir, idx)
-                faces, boxes = detect_faces(image, mtcnn)
-                if faces is not None:
-                    batch_images.extend(faces)
-                    batch_boxes.extend(boxes)
+                race_data.extend(races)
+                gender_data.extend(genders)
+                race_4group_data.extend(race_4groups)
 
-        if len(batch_images) > 0:
-            race_preds, gender_preds, _, _ = predict_race_gender(batch_images, fairface)
-            races = map_race(race_preds)
-            genders = map_gender(gender_preds)
-            race_4groups = map_race_4group(races)
+                if args.visualization_steps and processed_images % args.visualization_steps == 0:
+                    visualize_faces(args, faces, boxes, processed_images, quantile)
 
-            race_data.extend(races)
-            gender_data.extend(genders)
-            race_4group_data.extend(race_4groups)
-
-            if (batch_start // args.batch_size) % args.visualization_steps == 0:
-                visualize_faces(args, batch_images, batch_boxes, batch_start // args.batch_size, quantile)
+            processed_images += 1
+            pbar.update(1)
 
     return race_data, gender_data, race_4group_data
 
@@ -120,6 +112,9 @@ def main():
             plot_distribution(args, race_data, 'Race', quantile)
             plot_distribution(args, gender_data, 'Gender', quantile)
             plot_distribution(args, race_4group_data, 'Race (4 Groups)', quantile)
+
+        print("Visualizing images")
+        visualize_images(args, metadata)
     else:
         print("Processing all data...")
         race_data, gender_data, race_4group_data = analyze_images(args, metadata)
@@ -127,15 +122,21 @@ def main():
         plot_distribution(args, gender_data, 'Gender')
         plot_distribution(args, race_4group_data, 'Race (4 Groups)')
 
+        print("Visualizing images")
+        visualize_images(args, metadata)
+
     print("Analysis complete.")
 
 def create_argparser():
     defaults = dict(
-        data_dir="dataset_2_ms_faces",
-        output_dir="ms_with_faces_analysis/q-4",
+        data_dir="dataset",
+        output_dir="analysis-q4",
         quantiles=4,
         batch_size=640,
-        visualization_steps=2,
+        visualization_steps=None,
+        images_per_grid=64,
+        num_prompt_groups=6,
+        grid_nrow=8,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():

@@ -32,15 +32,15 @@ def predict_gender(faces, fairface, device):
 
     return gender_scores
 
-def predict_race_gender(faces, fairface):
+def predict_race_gender(faces, fairface, device):
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    face_tensors = torch.stack([transform(face) for face in faces])
-    face_tensors = face_tensors.to(fairface.device)
+    face_tensors = torch.stack([transform(ToPILImage()(face.squeeze(0))) for face in faces])
+    face_tensors = face_tensors.to(device)
 
     outputs = fairface(face_tensors)
     outputs = outputs.cpu().detach().numpy()

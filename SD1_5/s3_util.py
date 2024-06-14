@@ -9,7 +9,15 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def compress_dataset(dataset_dir, compressed_file):
     print(f"Compressing dataset directory '{dataset_dir}' to '{compressed_file}'...")
-    shutil.make_archive(compressed_file, 'zip', os.path.dirname(dataset_dir), os.path.basename(dataset_dir))
+    
+    def make_archive(base_name, format, root_dir, base_dir):
+        shutil.make_archive(base_name, format, root_dir, base_dir)
+    
+    total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))
+    with tqdm(total=total_files, unit='file', desc='Compressing') as pbar:
+        make_archive(compressed_file, 'zip', os.path.dirname(dataset_dir), os.path.basename(dataset_dir))
+        pbar.update(total_files)
+    
     print("Dataset compressed successfully.")
 
 def upload_to_s3(compressed_file, bucket_name, access_key_id, secret_access_key):
@@ -29,15 +37,21 @@ def download_from_s3(bucket_name, compressed_file, access_key_id, secret_access_
 
 def extract_dataset(compressed_file, dataset_dir):
     print(f"Extracting '{compressed_file}' to '{dataset_dir}'...")
+    
+    def unpack_archive(filename, extract_dir):
+        shutil.unpack_archive(filename, extract_dir)
+    
     with tqdm(unit='file', desc='Extracting') as pbar:
-        shutil.unpack_archive(compressed_file + '.zip', dataset_dir)
-        pbar.update(1)
+        unpack_archive(compressed_file + '.zip', dataset_dir)
+        total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))
+        pbar.update(total_files)
+    
     print("Dataset extracted successfully.")
 
 def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
-    parser.add_argument('--dataset_dir', default='output-FF-08T-5it', help='Directory containing the dataset')
+    parser.add_argument('--dataset_dir', default='', help='Directory containing the dataset')
     parser.add_argument('--compressed_file', default='ms_RV2_5000_balanced_FF-Face---08T-5it', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     args = parser.parse_args()
