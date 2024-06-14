@@ -148,7 +148,7 @@ def create_argparser():
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
         n_iter=5,
-        visual_check_interval=None,
+        visual_check_interval=1,
         num_occupations=None,
         save_interval=1, 
         T_frac=0.8,
