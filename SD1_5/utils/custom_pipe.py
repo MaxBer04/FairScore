@@ -24,6 +24,9 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 class CustomDiffusionPipeline(StableDiffusionPipeline):
 
+    def run_safety_checker(self, image, device, dtype):
+        return image, None
+
     def __init__(
         self,
         vae: AutoencoderKL,

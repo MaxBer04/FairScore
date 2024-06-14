@@ -6,7 +6,7 @@ from accelerate.utils import gather_object
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-def save_data(args, dataset, ms_tuples, accelerator):
+def save_data(output_path, dataset, ms_tuples, accelerator):
     gathered_ms_tuples = [tuple_ele for process in gather_object([ms_tuples]) for tuple_ele in process]
     print(f"MS gathered list length: {len(gathered_ms_tuples)}")
     
@@ -23,7 +23,6 @@ def save_data(args, dataset, ms_tuples, accelerator):
         # Lade die Bilder basierend auf den gespeicherten Indizes
         images = [dataset[idx][0] for idx in indices]
 
-        output_path = os.path.join(script_dir, args.output_dir)
         os.makedirs(output_path, exist_ok=True)
 
         # Speichere die Metadaten in einer CSV-Datei

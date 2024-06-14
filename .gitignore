@@ -2,6 +2,7 @@
 __pycache__/
 classify_image_graph_def.pb
 
+SD1_5/output-FF-08T-5it
 SD1_5/dataset
 SD1_5/*.pt
 SD1_5/*.png

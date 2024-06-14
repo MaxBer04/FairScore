@@ -20,7 +20,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
 sys.path.insert(0, project_root)
 
-def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface, accelerator):
+def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface, accelerator, output_path):
     ms_tuples = []
 
     dataloader = th.utils.data.DataLoader(local_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
@@ -89,12 +89,12 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
 
             if args.visual_check_interval and (batch_idx + 1) % args.visual_check_interval == 0:
                 grid = make_grid(reconstructed_images, nrow=args.n_iter + 1)
-                save_image(grid, os.path.join(script_dir, args.output_dir, 'reconstructed', f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
+                save_image(grid, os.path.join(output_path, 'reconstructed', f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
 
             # Überprüfe, ob alle GPUs x Occupations fertig erstellt haben
             if (batch_idx + 1) % args.save_interval == 0:
                 # Speichere die Daten periodisch
-                save_data(args, global_dataset, ms_tuples, accelerator)
+                save_data(output_path, global_dataset, ms_tuples, accelerator)
                 ms_tuples = []  # Leere die Liste, um Speicher freizugeben
 
     return ms_tuples
@@ -120,10 +120,11 @@ def main():
     dataset = OccupationDataset(args.data_dir, num_occupations=args.num_occupations)
     accelerator.print(f"Total of {len(dataset)} images")
 
+    output_path = os.path.join(script_dir, args.output_dir)
     if accelerator.is_main_process:
-        os.makedirs(os.path.join(script_dir, args.output_dir), exist_ok=True)
+        os.makedirs(output_path, exist_ok=True)
         if args.visual_check_interval:
-            os.makedirs(os.path.join(script_dir, args.output_dir, 'reconstructed'), exist_ok=True)
+            os.makedirs(os.path.join(output_path, 'reconstructed'), exist_ok=True)
 
     accelerator.wait_for_everyone()
     accelerator.print("Computing minority scores and saving reconstructions...")
@@ -131,16 +132,16 @@ def main():
         local_dataset = dataset.select(dataset_idcs)
 
         print(f"GPU{accelerator.process_index} working on {len(local_dataset)} entries")
-        ms_tuples = compute_minority_scores(args, dataset, local_dataset, pipe, fairface, accelerator)
+        ms_tuples = compute_minority_scores(args, dataset, local_dataset, pipe, fairface, accelerator, output_path)
 
-    save_data(args, dataset, ms_tuples, accelerator)
+    save_data(output_path, dataset, ms_tuples, accelerator)
 
     accelerator.wait_for_everyone()
     print("Dataset construction complete")
 
 def create_argparser():
     defaults = dict(
-        batch_size=20,
+        batch_size=48,
         use_fp16=True,
         data_dir="dataset",
         output_dir="output-FF-08T-5it",
