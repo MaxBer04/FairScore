@@ -13,7 +13,7 @@ def load_fairface_model(device):
     model.eval()
     return model
 
-def predict_gender(faces, fairface):
+def predict_gender(faces, fairface, device):
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -21,7 +21,7 @@ def predict_gender(faces, fairface):
     ])
 
     face_tensors = torch.stack([transform(ToPILImage()(face.squeeze(0))) for face in faces])
-    face_tensors = face_tensors.to(fairface.device)
+    face_tensors = face_tensors.to(device)
 
     outputs = fairface(face_tensors)
     outputs = outputs.cpu().detach().numpy()

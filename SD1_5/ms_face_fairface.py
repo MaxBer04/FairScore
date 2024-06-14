@@ -105,7 +105,7 @@ def main():
     accelerator = Accelerator()
     accelerator.print(f"Using {accelerator.num_processes} GPUs.")
 
-    fairface = load_fairface_model().to(accelerator.device)
+    fairface = load_fairface_model(accelerator.device)
 
     accelerator.print("Loading Stable Diffusion model...")
     model_id = args.model_id
@@ -133,7 +133,6 @@ def main():
         print(f"GPU{accelerator.process_index} working on {len(local_dataset)} entries")
         ms_tuples = compute_minority_scores(args, dataset, local_dataset, pipe, fairface, accelerator)
 
-    # Speichere die verbleibenden Daten
     save_data(args, dataset, ms_tuples, accelerator)
 
     accelerator.wait_for_everyone()
@@ -150,7 +149,7 @@ def create_argparser():
         n_iter=5,
         visual_check_interval=None,
         num_occupations=None,
-        save_interval=1,  # Füge das Argument für das Speicherintervall hinzu
+        save_interval=1, 
         T_frac=0.8,
     )
     parser = argparse.ArgumentParser()
