@@ -5,7 +5,6 @@ import numpy as np
 import torch as th
 from torchvision.utils import save_image, make_grid
 from torchvision.transforms import ToTensor
-from diffusers import StableDiffusionPipeline
 from tqdm import tqdm
 from accelerate import Accelerator
 from facenet_pytorch import MTCNN
@@ -60,7 +59,7 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
                 noise = th.randn_like(latents)
                 noisy_latents = pipe.scheduler.add_noise(latents, noise, timesteps)
 
-                denoised_images = pipe(prompts, latents=noisy_latents).images
+                denoised_images = pipe(prompts, latents=noisy_latents, t_frac=args.T_frac).images
                 denoised_images = th.stack([ToTensor()(img) for img in denoised_images]).to(accelerator.device)
                 denoised_images = (denoised_images * 2 - 1).clamp_(0.0, 1.0)
 

@@ -1,13 +1,11 @@
 import argparse
 import os
 import sys
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PIL import Image, ImageDraw
 import torch
-from torchvision.transforms import ToPILImage
 from facenet_pytorch import MTCNN
 from torchvision.utils import make_grid, save_image
 
