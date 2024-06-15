@@ -130,8 +130,8 @@ def main():
 def create_argparser():
     defaults = dict(
         data_dir="dataset",
-        output_dir="analysis-q4",
-        quantiles=4,
+        output_dir="analysis-q2",
+        quantiles=2,
         batch_size=640,
         visualization_steps=None,
         images_per_grid=64,
