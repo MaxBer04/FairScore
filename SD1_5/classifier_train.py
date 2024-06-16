@@ -25,7 +25,7 @@ def main():
     logger.configure()
 
     logger.log("creating model...")
-    model = create_classifier(**args_to_dict(args, classifier_defaults(out_channels=args.num_quantiles).keys()))
+    model = create_classifier(**args_to_dict(args, classifier_defaults(out_channels=args.num_quantiles, in_channels=4).keys()))
     model.to(dist_util.dev())
 
     if args.noised:
@@ -70,17 +70,17 @@ def main():
             latents = latents * diffusion_model.vae.config.scaling_factor
 
             if args.noised:
-                # Verrausche die Latents mit dem Diffusionsmodell
                 t = th.randint(0, diffusion_model.scheduler.config.num_train_timesteps, (latents.shape[0],), device=latents.device)
                 noise = th.randn_like(latents)
                 latents_noised = diffusion_model.scheduler.add_noise(latents, noise, t)
             else:
+                t = th.zeros(batch.shape[0], dtype=th.long, device=dist_util.dev())
                 latents_noised = latents
 
             if f_extractor is not None:
                 latents_noised = f_extractor(latents_noised)
 
-            logits = model(latents_noised)
+            logits = model(latents_noised, timesteps=t)
             loss = F.cross_entropy(logits, quantiles)
 
             with th.no_grad():
