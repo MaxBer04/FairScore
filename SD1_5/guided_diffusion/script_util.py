@@ -24,7 +24,7 @@ def diffusion_defaults():
     )
 
 
-def classifier_defaults():
+def classifier_defaults(out_channels=1000):
     """
     Defaults for classifier models.
     """
@@ -38,7 +38,7 @@ def classifier_defaults():
         classifier_resblock_updown=True,  # False
         classifier_pool="attention",
         in_channels=3,
-        out_channels=1000
+        out_channels=out_channels
     )
 
 

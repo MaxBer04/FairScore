@@ -1,5 +1,7 @@
 import os
 import torch as th
+import pandas as pd
+from torch.utils.data import Dataset
 from PIL import Image
 from torchvision.transforms import ToTensor
 
@@ -20,6 +22,23 @@ def read_csv_with_commas(file_path, occupation):
         prompts.append((normal_prompt, sensitive_prompt))
 
     return prompts
+
+class MinorityScoreDataset(Dataset):
+    def __init__(self, data_dir, num_quantiles):
+        self.data_dir = data_dir
+        self.metadata = pd.read_csv(os.path.join(data_dir, "metadata.csv"), header=None, names=["idx", "prompt", "score"])
+        self.num_quantiles = num_quantiles
+        self.quantiles = pd.qcut(self.metadata["score"], q=num_quantiles, labels=False)
+
+    def __len__(self):
+        return len(self.metadata)
+
+    def __getitem__(self, idx):
+        image_path = os.path.join(self.data_dir, f"{self.metadata.iloc[idx]['idx']}.png")
+        image = Image.open(image_path).convert("RGB")
+        image_tensor = ToTensor()(image)
+        quantile = self.quantiles[idx]
+        return image_tensor, quantile
 
 class OccupationDataset(th.utils.data.Dataset):
     def __init__(self, data_dir, num_occupations=None):
