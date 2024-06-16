@@ -21,6 +21,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 def main():
     args = create_argparser().parse_args()
     args.data_dir = os.path.join(script_dir, args.data_dir)
+    args.resume_from_checkpoint = os.path.join(script_dir, args.resume_from_checkpoint)
 
     accelerator = Accelerator(mixed_precision="fp16" if args.use_fp16 else "no")
 
@@ -30,6 +31,12 @@ def main():
     if accelerator.is_main_process:
         logger.log("creating model...")
     model = create_classifier(**args_to_dict(args, classifier_defaults(out_channels=args.num_quantiles, in_channels=4).keys()))
+    
+    if args.resume_from_checkpoint:
+        if accelerator.is_main_process:
+            logger.log(f"loading model from checkpoint: {args.resume_from_checkpoint}...")
+        model.load_state_dict(th.load(args.resume_from_checkpoint, map_location="cpu"))
+    
     model.to(accelerator.device)
 
     if accelerator.is_main_process:
@@ -110,7 +117,11 @@ def main():
                     opt.step()
                     opt.zero_grad()
 
-    for epoch in range(args.epochs):
+    start_epoch = 0
+    if args.resume_from_checkpoint:
+        start_epoch = int(args.resume_from_checkpoint.split("_")[-1].split(".")[0])
+
+    for epoch in range(start_epoch, args.epochs):
         if accelerator.is_main_process:
             logger.log(f"Epoch {epoch}")
         model.train()
@@ -134,7 +145,7 @@ def create_argparser():
         data_dir="dataset",
         lr=1e-4,
         batch_size=24,
-        epochs=100,
+        epochs=80,
         num_quantiles=4,
         model_id="SG161222/Realistic_Vision_V2.0",
         use_fp16=False,
@@ -144,6 +155,7 @@ def create_argparser():
         train_split=0.9,
         wandb_project="minority-score-classifier",
         wandb_name="FF-08T-5it",
+        resume_from_checkpoint="model_75.pt",
     )
     defaults.update(classifier_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
