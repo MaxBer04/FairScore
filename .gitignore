@@ -11,3 +11,4 @@ SD1_5/*.png
 SD1_5/aws_accessKeys.csv
 *.zip
 */*.zip
+wandb
