@@ -125,7 +125,7 @@ def create_argparser():
         lr=1e-4,
         batch_size=24,
         epochs=100,
-        num_quantiles=8,
+        num_quantiles=4,
         model_id="SG161222/Realistic_Vision_V2.0",
         use_fp16=False,
         feature_extractor=None,
