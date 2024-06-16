@@ -24,22 +24,25 @@ def main():
 
     accelerator = Accelerator(mixed_precision="fp16" if args.use_fp16 else "no")
 
-    logger.configure()
+    if accelerator.is_main_process:
+        logger.configure()
 
-    logger.log("creating model...")
+    if accelerator.is_main_process:
+        logger.log("creating model...")
     model = create_classifier(**args_to_dict(args, classifier_defaults(out_channels=args.num_quantiles, in_channels=4).keys()))
     model.to(accelerator.device)
 
-    if args.noised:
+    if accelerator.is_main_process:
         logger.log("loading diffusion model...")
-        diffusion_model = CustomDiffusionPipeline.from_pretrained(args.model_id)
-        diffusion_model.to("cpu")
-        diffusion_model.vae.to(accelerator.device)
-        if args.use_fp16:
-            diffusion_model.vae.to(th.float16)
+    diffusion_model = CustomDiffusionPipeline.from_pretrained(args.model_id)
+    diffusion_model.to("cpu")
+    diffusion_model.vae.to(accelerator.device)
+    if args.use_fp16:
+        diffusion_model.vae.to(th.float16)
 
     if args.feature_extractor:
-        logger.log("loading feature extractor...")
+        if accelerator.is_main_process:
+            logger.log("loading feature extractor...")
         f_extractor = create_classifier(**args_to_dict(args, classifier_and_diffusion_defaults().keys()))
         f_extractor.load_state_dict(th.load(args.feature_extractor, map_location="cpu"))
         f_extractor.to(accelerator.device)
@@ -51,7 +54,8 @@ def main():
     else:
         f_extractor = None
 
-    logger.log(f"creating data loader...")
+    if accelerator.is_main_process:
+        logger.log(f"creating data loader...")
 
     dataset = MinorityScoreDataset(args.data_dir, args.num_quantiles)
     train_size = int(args.train_split * len(dataset))
@@ -65,9 +69,11 @@ def main():
         model, train_loader, val_loader, th.optim.Adam(model.parameters(), lr=args.lr)
     )
 
-    wandb.init(project=args.wandb_project, name=args.wandb_name, config=vars(args))
+    if accelerator.is_main_process:
+        wandb.init(project=args.wandb_project, name=args.wandb_name, config=vars(args))
 
-    logger.log("training classifier model...")
+    if accelerator.is_main_process:
+        logger.log("training classifier model...")
 
     def forward_backward_log(data_loader, prefix="train"):
         for batch in data_loader:
@@ -95,7 +101,8 @@ def main():
 
                 acc = (logits.argmax(dim=-1) == quantiles).float().mean()
 
-                wandb.log({f"{prefix}_loss": loss.item(), f"{prefix}_acc": acc.item()})
+                if accelerator.is_main_process:
+                    wandb.log({f"{prefix}_loss": loss.item(), f"{prefix}_acc": acc.item()})
 
                 if prefix == "train":
                     accelerator.backward(loss)
@@ -104,24 +111,27 @@ def main():
                     opt.zero_grad()
 
     for epoch in range(args.epochs):
-        logger.log(f"Epoch {epoch}")
+        if accelerator.is_main_process:
+            logger.log(f"Epoch {epoch}")
         model.train()
         forward_backward_log(train_loader)
 
-        logger.log("validating...")
+        if accelerator.is_main_process:
+            logger.log("validating...")
         model.eval()
         with th.no_grad():
             forward_backward_log(val_loader, prefix="val")
 
-        if (epoch + 1) % args.save_interval == 0:
+        if (epoch + 1) % args.save_interval == 0 and accelerator.is_main_process:
             logger.log(f"saving model at epoch {epoch}...")
             accelerator.save(model.state_dict(), os.path.join(wandb.run.dir, f"model_{epoch}.pt"))
 
-    wandb.finish()
+    if accelerator.is_main_process:
+        wandb.finish()
 
 def create_argparser():
     defaults = dict(
-        data_dir="output-FF-08T-5it",
+        data_dir="dataset",
         lr=1e-4,
         batch_size=24,
         epochs=100,
@@ -130,7 +140,7 @@ def create_argparser():
         use_fp16=False,
         feature_extractor=None,
         noised=True,
-        save_interval=1,
+        save_interval=4,
         train_split=0.9,
         wandb_project="minority-score-classifier",
         wandb_name="FF-08T-5it",

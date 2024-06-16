@@ -40,6 +40,8 @@ class MinorityScoreDataset(Dataset):
         quantile = self.quantiles[idx]
         return image_tensor, quantile
 
+
+
 class OccupationDataset(th.utils.data.Dataset):
     def __init__(self, data_dir, num_occupations=None):
         self.data_dir = data_dir
