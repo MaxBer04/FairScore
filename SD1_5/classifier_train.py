@@ -21,7 +21,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 def main():
     args = create_argparser().parse_args()
     args.data_dir = os.path.join(script_dir, args.data_dir)
-    args.resume_from_checkpoint = os.path.join(script_dir, args.resume_from_checkpoint)
+    if args.resume_from_checkpoint:
+        args.resume_from_checkpoint = os.path.join(script_dir, args.resume_from_checkpoint)
 
     accelerator = Accelerator(mixed_precision="fp16" if args.use_fp16 else "no")
 
@@ -145,7 +146,7 @@ def create_argparser():
         data_dir="dataset",
         lr=1e-4,
         batch_size=24,
-        epochs=80,
+        epochs=200,
         num_quantiles=4,
         model_id="SG161222/Realistic_Vision_V2.0",
         use_fp16=False,
@@ -155,7 +156,7 @@ def create_argparser():
         train_split=0.9,
         wandb_project="minority-score-classifier",
         wandb_name="FF-08T-5it",
-        resume_from_checkpoint="model_75.pt",
+        resume_from_checkpoint=None,
     )
     defaults.update(classifier_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
