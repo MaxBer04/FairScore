@@ -141,17 +141,17 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=48,
+        batch_size=32,
         use_fp16=True,
         data_dir="dataset",
-        output_dir="output-FF-08T-5it",
+        output_dir="output-50k-FF-09T-5it",
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
         n_iter=5,
         visual_check_interval=1,
         num_occupations=None,
         save_interval=1, 
-        T_frac=0.8,
+        T_frac=0.9,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
