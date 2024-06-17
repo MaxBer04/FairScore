@@ -174,11 +174,11 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        num_samples=100,  # Pro Occupation
-        batch_size=100,
+        num_samples=200,  # Pro Occupation
+        batch_size=48,
         use_fp16=True,
         seed="",
-        output_dir="dataset_2",
+        output_dir="dataset",
         model_id="SG161222/Realistic_Vision_V2.0"  # "runwayml/stable-diffusion-v1-5"
     )
     parser = argparse.ArgumentParser()
