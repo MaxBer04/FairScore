@@ -8,6 +8,7 @@ from torchvision.transforms import ToTensor
 from tqdm import tqdm
 from accelerate import Accelerator
 from facenet_pytorch import MTCNN
+import pandas as pd
 
 # Importiere die benötigten Utility-Klassen und -Funktionen
 from utils.dataset import OccupationDataset, collate_fn
@@ -29,6 +30,7 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
 
     with th.no_grad():
         for batch_idx, (images, prompts, original_indices) in enumerate(tqdm(dataloader)):
+
             print(f"Process: {accelerator.process_index}, {prompts[0]}")
 
             # Konvertiere die Bilder in den richtigen Datentyp
@@ -46,9 +48,9 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
             original_indices = [original_indices[i] for i in face_indices]
 
             batch_gender_scores = [[] for _ in range(len(images))]
-            if args.visual_check_interval:
-                reconstructed_images = th.zeros(len(images) * (args.n_iter + 1), 3, images.shape[-2], images.shape[-1], device=accelerator.device)
-                reconstructed_images[:len(images)] = images
+            if args.visual_check_interval and (batch_idx + 1) % args.visual_check_interval == 0:
+                reconstructed_images = th.zeros((args.n_iter + 1), len(images), 3, images.shape[-2], images.shape[-1], device=accelerator.device)
+                reconstructed_images[0] = images
 
             latents = pipe.vae.encode(images).latent_dist.sample().detach()
             latents = latents * pipe.vae.config.scaling_factor
@@ -74,8 +76,8 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
                         gender_score_distance = th.norm(original_gender_scores - denoised_gender_scores, p=2).item()
                         batch_gender_scores[j].append(gender_score_distance)
 
-                if args.visual_check_interval:
-                    reconstructed_images[len(images) * (i + 1):len(images) * (i + 2)] = denoised_images
+                if args.visual_check_interval and (batch_idx + 1) % args.visual_check_interval == 0:
+                    reconstructed_images[i+1] = denoised_images
 
             # Filtere Bilder ohne Scores heraus und berechne den Mittelwert der Scores für jedes Bild
             filtered_indices = [i for i, scores in enumerate(batch_gender_scores) if len(scores) > 0]
@@ -88,6 +90,7 @@ def compute_minority_scores(args, global_dataset, local_dataset, pipe, fairface,
                 ms_tuples.append((original_idx, prompt, score))
 
             if args.visual_check_interval and (batch_idx + 1) % args.visual_check_interval == 0:
+                reconstructed_images = reconstructed_images.permute(1, 0, 2, 3, 4).reshape(-1, 3, images.shape[-2], images.shape[-1])
                 grid = make_grid(reconstructed_images, nrow=args.n_iter + 1)
                 save_image(grid, os.path.join(output_path, 'reconstructed', f'reconstructed_{accelerator.process_index}_{batch_idx}.png'))
 
@@ -118,7 +121,6 @@ def main():
     accelerator.print("Creating dataset...")
     args.data_dir = os.path.join(script_dir, args.data_dir)
     dataset = OccupationDataset(args.data_dir, num_occupations=args.num_occupations)
-    accelerator.print(f"Total of {len(dataset)} images")
 
     output_path = os.path.join(script_dir, args.output_dir)
     if accelerator.is_main_process:
@@ -126,8 +128,22 @@ def main():
         if args.visual_check_interval:
             os.makedirs(os.path.join(output_path, 'reconstructed'), exist_ok=True)
 
+   # Lade bereits verarbeitete Indizes, falls vorhanden
+    processed_indices = set()
+    if args.resume:
+        metadata_file = os.path.join(output_path, "metadata.csv")
+        if os.path.exists(metadata_file):
+            metadata = pd.read_csv(metadata_file, header=None, names=["idx", "prompt", "score"])
+            processed_indices = set(metadata["idx"].tolist())
+
+    # Filtere den Datensatz, um bereits verarbeitete Bilder zu entfernen
+    if processed_indices:
+        remaining_indices = [i for i in range(len(dataset)) if i not in processed_indices]
+        dataset = dataset.select(remaining_indices)
+
     accelerator.wait_for_everyone()
-    accelerator.print("Computing minority scores and saving reconstructions...")
+    accelerator.print(f"Total of {len(dataset)} images")
+    accelerator.print(f"Computing minority scores and saving reconstructions...")
     with accelerator.split_between_processes(list(range(len(dataset)))) as dataset_idcs:
         local_dataset = dataset.select(dataset_idcs)
 
@@ -141,17 +157,18 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        batch_size=32,
+        batch_size=40,
         use_fp16=True,
         data_dir="dataset",
         output_dir="output-50k-FF-09T-5it",
         model_id="SG161222/Realistic_Vision_V2.0",
         ms_compute_only=False,
         n_iter=5,
-        visual_check_interval=1,
+        visual_check_interval=10,
         num_occupations=None,
-        save_interval=1, 
+        save_interval=2,
         T_frac=0.9,
+        resume=True,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():

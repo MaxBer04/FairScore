@@ -21,7 +21,7 @@ def save_data(output_path, dataset, ms_tuples, accelerator):
             scores.append(score)
 
         # Lade die Bilder basierend auf den gespeicherten Indizes
-        images = [dataset[idx][0] for idx in indices]
+        images = [dataset[dataset.original_indices.index(idx)][0] for idx in indices]
 
         os.makedirs(output_path, exist_ok=True)
 

@@ -81,7 +81,6 @@ class ClassifierGuidedStableDiffusionPipeline(StableDiffusionPipeline):
                 latents_in = latents.detach().requires_grad_(True)
                 if f_extractor is not None:
                     latents_in = f_extractor(latents_in, t)
-                print(t)
                 logits = classifier(latents_in, t)
 
                 log_probs = torch.nn.functional.log_softmax(logits, dim=-1)

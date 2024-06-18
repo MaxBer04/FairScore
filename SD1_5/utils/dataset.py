@@ -74,6 +74,7 @@ class OccupationDataset(th.utils.data.Dataset):
         selected_dataset.image_files = [self.image_files[i] for i in indices]
         selected_dataset.prompts = [self.prompts[i] for i in indices]
         selected_dataset.indices = [self.indices[i] for i in indices]
+        selected_dataset.original_indices = indices
         return selected_dataset
 
 def collate_fn(batch):
