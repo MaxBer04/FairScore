@@ -8,7 +8,6 @@ import torch as th
 from tqdm import tqdm
 from diffusers import StableDiffusionPipeline
 from accelerate import Accelerator
-from accelerate.utils import gather_object
 
 from rich.console import Console
 from rich.panel import Panel
@@ -153,20 +152,6 @@ def main():
     if accelerator.is_main_process:
         progress_bar.stop()
         console.print(Panel("[bold green]Image generation completed[/bold green]"))
-
-    """     accelerator.wait_for_everyone()
-    gathered_dataset = gather_object([dataset])
-    if accelerator.is_main_process:
-        custom_dict = {}
-        for dataset in gathered_dataset:
-            for occupation, data in dataset.items():
-                if occupation not in custom_dict:
-                    custom_dict[occupation] = {"images": [], "sensitive_prompts": [], "normal_prompts": []}
-                
-                custom_dict[occupation]["images"].extend(data["images"])
-                custom_dict[occupation]["sensitive_prompts"].extend(data["sensitive_prompts"])
-                custom_dict[occupation]["normal_prompts"].extend(data["normal_prompts"])
-        image_counter = save_dataset(custom_dict, output_dir, image_counter) """
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:

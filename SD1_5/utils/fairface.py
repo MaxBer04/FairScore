@@ -1,4 +1,4 @@
-import torch
+import torch as th
 import torch.nn as nn
 import torchvision
 import numpy as np
@@ -8,29 +8,36 @@ from torchvision.transforms import ToPILImage
 def load_fairface_model(device):
     model = torchvision.models.resnet34(pretrained=True)
     model.fc = nn.Linear(model.fc.in_features, 18)
-    model.load_state_dict(torch.hub.load_state_dict_from_url('https://drive.google.com/uc?id=113QMzQzkBDmYMs9LwzvD-jxEZdBQ5J4X&export=download'))
+    model.load_state_dict(th.hub.load_state_dict_from_url('https://drive.google.com/uc?id=113QMzQzkBDmYMs9LwzvD-jxEZdBQ5J4X&export=download'))
     model = model.to(device)
     model.eval()
     return model
 
-def predict_gender(faces, fairface, device):
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+def predict_gender(face, fairface, device):
+    if face is None:
+        return []
 
-    face_tensors = torch.stack([transform(ToPILImage()(face.squeeze(0))) for face in faces])
-    face_tensors = face_tensors.to(device)
+    if not isinstance(face, th.Tensor):
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
 
-    outputs = fairface(face_tensors)
-    outputs = outputs.cpu().detach().numpy()
+    face_tensor = transform(face).to(device)
 
-    gender_outputs = outputs[:, 7:9]
-    gender_scores = torch.from_numpy(gender_outputs)
-    gender_scores = torch.softmax(gender_scores, dim=1)
+    output = fairface(face_tensor).cpu().detach().numpy()
 
-    return gender_scores
+    gender_output = output[:, 7:9]
+    gender_scores = th.from_numpy(gender_output)
+    gender_scores = th.softmax(gender_scores, dim=1)
+
+    return gender_scores.tolist()[0]
 
 def predict_race_gender(faces, fairface, device):
     transform = transforms.Compose([
@@ -39,7 +46,7 @@ def predict_race_gender(faces, fairface, device):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    face_tensors = torch.stack([transform(ToPILImage()(face.squeeze(0))) for face in faces])
+    face_tensors = th.stack([transform(ToPILImage()(face.squeeze(0))) for face in faces])
     face_tensors = face_tensors.to(device)
 
     outputs = fairface(face_tensors)
