@@ -1,5 +1,5 @@
 import torch as th
-from torchvision.transforms import ToPILImage
+from torchvision.transforms import ToPILImage, ToTensor
 
 def detect_faces(images, mtcnn):
     # Konvertiere die Bilder in PIL-Bilder
@@ -14,12 +14,9 @@ def detect_faces(images, mtcnn):
     for image in pil_images:
         image_boxes, _ = mtcnn.detect(image)
         if image_boxes is not None:
-            for box in image_boxes:
-                x1, y1, x2, y2 = box.astype(int)
-                face_img = image.crop((x1, y1, x2, y2))
-                face = mtcnn(face_img, return_prob=False)
-                faces.append(face)
-                boxes.append(box)
+            image_faces = mtcnn(image)
+            faces.append(th.unsqueeze(image_faces[0], 0))
+            boxes.append(image_boxes[0])
         else:
             faces.append(None)
             boxes.append(None)

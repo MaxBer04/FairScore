@@ -37,37 +37,38 @@ def generate_prompts(occupation, batch_size):
 
 def save_dataset(dataset, output_dir):
     logger.log(f"\nSaving dataset to {output_dir}...")
-    for occupation, data in dataset.items():
-        if len(data["h_vects"]) > 0:
-            occ_dir = os.path.join(output_dir, occupation)
-            os.makedirs(occ_dir, exist_ok=True)
-            
-            # Speichere h_vects als NumPy-Arrays
-            for i, h_vects in enumerate(data["h_vects"]):
-                np.savez(os.path.join(occ_dir, f"{i}_h_vects.npz"), **{str(k): v for k, v in h_vects.items()})
-            
-            # Speichere Metadaten in einer JSON-Datei
-            with open(os.path.join(occ_dir, "metadata.json"), "w") as f:
-                json.dump({
-                    "normal_prompts": data["normal_prompts"],
-                    "sensitive_prompts": data["sensitive_prompts"],
-                    "face_detected": data["face_detected"],
-                    "gender_probs": data["gender_probs"]
-                }, f)
+    for key, data in dataset.items():
+        print(type(data))
+        print(data[0])
+        # Speichere h_vects als NumPy-Arrays
+        np.savez(os.path.join(output_dir, f"h_vects.npz"), **{str(t): v for t, v in data["h_vects"].items()})
+        
+        # Speichere Metadaten in einer JSON-Datei
+        with open(os.path.join(output_dir, "metadata.json"), "w") as f:
+            json.dump({
+                "normal_prompts": data["normal_prompts"],
+                "sensitive_prompts": data["sensitive_prompts"],
+                "face_detected": data["face_detected"],
+                "gender_probs": data["gender_probs"],
+                "occupations": data["occupations"]
+            }, f)
 
-def plot_images(images, faces, boxes, gender_probs, batch_idx, output_dir):
+def plot_images(images, faces, boxes, gender_probs, batch_idx, output_dir, max_images):
     num_images = len(images)
-    if num_images > 10:
-        idxs = random.sample(range(num_images), 10)
+    if max_images == 0:
+      return
+    if num_images > max_images:
+        idxs = random.sample(range(num_images), max_images)
         images = [images[i] for i in idxs]
         faces = [faces[i] for i in idxs]
         boxes = [boxes[i] for i in idxs]
         gender_probs = [gender_probs[i] for i in idxs]
 
-    fig, axs = plt.subplots(2, 5, figsize=(20, 8))
+    size = int(np.sqrt(max_images))
+    fig, axs = plt.subplots(size, size, figsize=(20, 8))
     axs = axs.ravel()
 
-    for i, (img, face, box, gender_prob) in enumerate(zip(images, faces, boxes, gender_probs)):
+    for i, (img, face, box, gender_prob) in enumerate(zip(images[:max_images], faces[:max_images], boxes[:max_images], gender_probs[:max_images])):
         if not isinstance(img, th.Tensor):
           img = ToTensor()(img)
         img = img.cpu().numpy().transpose(1, 2, 0)
@@ -76,7 +77,7 @@ def plot_images(images, faces, boxes, gender_probs, batch_idx, output_dir):
 
         if face is not None:
             draw = ImageDraw.Draw(img)
-            draw.rectangle(box.tolist(), outline="red", width=2)
+            draw.rectangle(box.tolist(), outline="red", width=10)
 
         axs[i].imshow(img)
         if gender_prob:
@@ -138,7 +139,7 @@ def main():
     with accelerator.split_between_processes(occupations) as local_occupations:
 
         # Speicherstruktur: ein Dict pro Occupation
-        dataset = {occ: {"h_vects": [], "sensitive_prompts": [], "normal_prompts": [], "face_detected": [], "gender_probs": []} for occ in local_occupations}
+        dataset = {"h_vects": [], "sensitive_prompts": [], "normal_prompts": [], "face_detected": [], "gender_probs": [], "occupations": []}
 
         for idx, occupation in enumerate(local_occupations, start=1):
             for batch_start in range(0, args.num_samples, args.batch_size):
@@ -163,17 +164,18 @@ def main():
                         gender_probs_batch.append([])
 
                 for h_vect, normal_prompt, sensitive_prompt, face_detected, gender_prob in zip(h_vects, normal_prompts, sensitive_prompts, [face is not None for face in faces], gender_probs_batch):
-                    dataset[occupation]["h_vects"].append(h_vect)
-                    dataset[occupation]["sensitive_prompts"].append(sensitive_prompt)
-                    dataset[occupation]["normal_prompts"].append(normal_prompt)
-                    dataset[occupation]["face_detected"].append(face_detected)
-                    dataset[occupation]["gender_probs"].append(gender_prob)
+                    dataset["h_vects"].append(h_vect.cpu())
+                    dataset["sensitive_prompts"].append(sensitive_prompt)
+                    dataset["normal_prompts"].append(normal_prompt)
+                    dataset["face_detected"].append(face_detected)
+                    dataset["gender_probs"].append(gender_prob)
+                    dataset["occupations"].append(occupation)
                 
                 progress_bar.update(batch_size*accelerator.num_processes)
 
                 # Plotte Bilder nach jedem x-ten Batch
-                if (batch_start // args.batch_size) % args.plot_every == 0:
-                    plot_images(images, faces, boxes, gender_probs_batch, batch_start // args.batch_size, output_dir)
+                if args.plot_every and (batch_start // args.batch_size) % args.plot_every == 0:
+                    plot_images(images, faces, boxes, gender_probs_batch, batch_start // args.batch_size, output_dir, args.num_example_images)
 
     progress_bar.close()
 
@@ -181,16 +183,14 @@ def main():
     gathered_dataset = gather_object([dataset])
     if accelerator.is_main_process:
         custom_dict = {}
+        custom_dict = {"h_vects": [], "sensitive_prompts": [], "normal_prompts": [], "face_detected": [], "gender_probs": [], "occupations": []}
         for dataset in gathered_dataset:
-            for occupation, data in dataset.items():
-                if occupation not in custom_dict:
-                    custom_dict[occupation] = {"h_vects": [], "sensitive_prompts": [], "normal_prompts": [], "face_detected": [], "gender_probs": []}
-                
-                custom_dict[occupation]["h_vects"].extend(data["h_vects"])
-                custom_dict[occupation]["sensitive_prompts"].extend(data["sensitive_prompts"])
-                custom_dict[occupation]["normal_prompts"].extend(data["normal_prompts"])
-                custom_dict[occupation]["face_detected"].extend(data["face_detected"])
-                custom_dict[occupation]["gender_probs"].extend(data["gender_probs"])
+            custom_dict["h_vects"].extend(dataset["h_vects"])
+            custom_dict["sensitive_prompts"].extend(dataset["sensitive_prompts"])
+            custom_dict["normal_prompts"].extend(dataset["normal_prompts"])
+            custom_dict["face_detected"].extend(dataset["face_detected"])
+            custom_dict["gender_probs"].extend(dataset["gender_probs"])
+            custom_dict["occupations"].extend(dataset["occupations"])
         
         save_dataset(custom_dict, output_dir)
 
@@ -200,13 +200,14 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        num_samples=100,  # Pro Occupation
-        batch_size=20,
+        num_samples=12,  # Pro Occupation
+        batch_size=12,
         use_fp16=True,
         seed="",
         output_dir="dataset",
         model_id="SG161222/Realistic_Vision_V2.0",
-        plot_every=1  # Plotte Bilder nach jedem 5. Batch
+        plot_every=0,  # per batch
+        num_example_images=0 # should be square
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
