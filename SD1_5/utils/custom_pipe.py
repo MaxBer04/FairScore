@@ -430,7 +430,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-        h_vecs = {}
+        h_vects = {}
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -451,8 +451,8 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                     return_dict=False,
                 )
                 noise_pred = unet_results[0]
-                h_vec = unet_results[1]
-                h_vecs[t] = h_vec
+                h_vect = unet_results[1]
+                h_vects[int(t)] = h_vect
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -503,7 +503,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
         self.maybe_free_model_hooks()
 
         if not return_dict:
-            return (image, h_vecs)
+            return (image, h_vects)
 
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
 
