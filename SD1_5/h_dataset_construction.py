@@ -1,3 +1,4 @@
+import csv
 import argparse
 import os
 import sys
@@ -28,10 +29,17 @@ def load_occupations(file_path):
         data = json.load(f)
     return data['occupations']
 
-def generate_prompts(occupation, batch_size):
-    attributes = random.choices(["female", "male"], k=batch_size)
-    prompts = [f"A photo of the face of a {attr} {occupation}" for attr in attributes]
-    return prompts, attributes
+def generate_all_prompts(occupations, num_samples):
+    all_prompts = []
+    for occupation in occupations:
+        attributes = random.choices(["female", "male"], k=num_samples)
+        prompts = [f"A photo of the face of a {attr} {occupation}" for attr in attributes]
+        all_prompts.extend(prompts)
+    return all_prompts
+
+def get_occupation_from_prompt(prompt):
+    words = prompt.split()
+    return words[-1]  # Das letzte Wort ist die Occupation
 
 def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
     batch_data = []
@@ -51,6 +59,7 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
         batch_data.append({
             'image': images[idx],
             'prompt': prompts[idx],
+            'occupation': get_occupation_from_prompt(prompts[idx]),
             'h_vects': {ts: h_vects[ts][2*idx:2*idx+2].cpu().numpy() for ts in TIMESTEPS},
             'face_detected': face is not None,
             'gender_scores': gender_scores
@@ -58,44 +67,43 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
 
     return batch_data
 
-def save_data(output_path, data, accelerator):
+def save_data(output_path, data, accelerator, csv_writer, image_counter):
     print(f"SAVING DATA, on process: {accelerator.process_index}, num_images: {len(data)}")
     h_vects_dir = os.path.join(output_path, 'h_vects')
     os.makedirs(h_vects_dir, exist_ok=True)
 
+    rows_to_write = []
     for idx, item in enumerate(data):
         # Erstelle einen eindeutigen Dateinamen für jedes Bild
-        image_filename = f"image_{accelerator.process_index}_{idx}.png"
-        image_path = os.path.join(output_path, image_filename)
+        image_filename = f"image_{accelerator.process_index}_{image_counter}.png"
+        image_dir = os.path.join(output_path, "images")
+        os.makedirs(image_dir, exist_ok=True)
+        image_path = os.path.join(image_dir, image_filename)
 
         # Speichere das Bild
         item['image'].save(image_path)
 
         # Speichere h_vects
-        h_vects_filename = f"h_vects_{accelerator.process_index}_{idx}.npz"
+        h_vects_filename = f"h_vects_{accelerator.process_index}_{image_counter}.npz"
         h_vects_path = os.path.join(h_vects_dir, h_vects_filename)
         
         # Konvertiere die Zeitschritte in Strings
         h_vects_dict = {str(ts): arr for ts, arr in item['h_vects'].items()}
         np.savez_compressed(h_vects_path, **h_vects_dict)
 
-        # Erstelle den Dateinamen für die JSON-Datei
-        json_filename = f"data_{accelerator.process_index}_{idx}.json"
-        json_path = os.path.join(output_path, json_filename)
+        # Bereite die Zeile für die CSV-Datei vor
+        rows_to_write.append([
+            image_filename,
+            item['prompt'],
+            item['occupation'],
+            h_vects_filename,
+            item['face_detected'],
+            ','.join(map(str, item['gender_scores'])) if item['gender_scores'] else ''
+        ])
 
-        # Erstelle das Daten-Dictionary für die JSON-Datei
-        json_data = {
-            'image_filename': image_filename,
-            'prompt': item['prompt'],
-            'h_vects_filename': h_vects_filename,
-            'face_detected': item['face_detected'],
-            'gender_scores': item['gender_scores'] if len(item['gender_scores']) > 0 else []
-        }
+        image_counter += 1
 
-        # Speichere die JSON-Datei
-        with open(json_path, 'w') as f:
-            json.dump(json_data, f)
-
+    return rows_to_write, image_counter
 
 def main():
     args = create_argparser().parse_args()
@@ -115,37 +123,57 @@ def main():
 
     accelerator.print("Creating dataset...")
     occupations = load_occupations(os.path.join(script_dir, args.occupations_file))
+    all_prompts = generate_all_prompts(occupations, args.num_samples)
 
     output_path = os.path.join(script_dir, args.output_dir)
-    if accelerator.is_main_process:
-        os.makedirs(output_path, exist_ok=True)
+    
+    # Erstelle das Ausgabeverzeichnis für alle Prozesse
+    os.makedirs(output_path, exist_ok=True)
+    
+    # Warte, bis alle Prozesse das Verzeichnis erstellt haben
+    accelerator.wait_for_everyone()
 
     mtcnn = MTCNN(keep_all=True, device=accelerator.device)
 
-    with accelerator.split_between_processes(occupations) as local_occupations:
+    with accelerator.split_between_processes(all_prompts) as local_prompts:
         data = []
+        image_counter = 0
+        all_rows = []
 
-        for occupation in tqdm(local_occupations, desc="Processing occupations", disable=not accelerator.is_main_process):
-            for batch_start in range(0, args.num_samples, args.batch_size):
-                batch_size = min(args.batch_size, args.num_samples - batch_start)
-                prompts, attributes = generate_prompts(occupation, batch_size)
-                batch_data = process_batch(args, prompts, pipe, fairface, accelerator, mtcnn)
-                data.extend(batch_data)
+        for i in tqdm(range(0, len(local_prompts), args.batch_size), desc="Processing batches", disable=not accelerator.is_main_process):
+            batch_prompts = local_prompts[i:i+args.batch_size]
+            batch_data = process_batch(args, batch_prompts, pipe, fairface, accelerator, mtcnn)
+            data.extend(batch_data)
 
-                # Save data periodically to free up memory
-                if len(data) >= args.save_interval:
-                    save_data(output_path, data, accelerator)
-                    data = []
+            # Save data periodically to free up memory
+            if len(data) >= args.save_interval:
+                rows, image_counter = save_data(output_path, data, accelerator, None, image_counter)
+                all_rows.extend(rows)
+                data = []
 
         # Save remaining data
         if len(data) > 0:
-            save_data(output_path, data, accelerator)
+            rows, _ = save_data(output_path, data, accelerator, None, image_counter)
+            all_rows.extend(rows)
+
+    # Gather all rows from all processes
+    all_gathered_rows = accelerator.gather(all_rows)
+
+    # Write to CSV file (only on main process)
+    if accelerator.is_main_process:
+        csv_filename = "metadata.csv"
+        csv_path = os.path.join(output_path, csv_filename)
+        with open(csv_path, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(['image_filename', 'prompt', 'occupation', 'h_vects_filename', 'face_detected', 'gender_scores'])
+            for rows in all_gathered_rows:
+                csv_writer.writerows(rows)
 
     print(f"Dataset construction complete, process {accelerator.process_index}")
 
 def create_argparser():
     defaults = dict(
-        num_samples=40,
+        num_samples=100,
         batch_size=40,
         use_fp16=True,
         occupations_file="occupations.json",
