@@ -11,6 +11,7 @@ from accelerate import Accelerator
 from torchvision.transforms import ToTensor
 from facenet_pytorch import MTCNN
 from utils.custom_pipe import HDiffusionPipeline
+from accelerate.utils import gather_object
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
@@ -67,7 +68,7 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
 
     return batch_data
 
-def save_data(output_path, data, accelerator, csv_writer, image_counter):
+def save_data(output_path, data, accelerator, image_counter):
     print(f"SAVING DATA, on process: {accelerator.process_index}, num_images: {len(data)}")
     h_vects_dir = os.path.join(output_path, 'h_vects')
     os.makedirs(h_vects_dir, exist_ok=True)
@@ -137,8 +138,8 @@ def main():
 
     with accelerator.split_between_processes(all_prompts) as local_prompts:
         data = []
-        image_counter = 0
         all_rows = []
+        image_counter = 0
 
         for i in tqdm(range(0, len(local_prompts), args.batch_size), desc="Processing batches", disable=not accelerator.is_main_process):
             batch_prompts = local_prompts[i:i+args.batch_size]
@@ -147,17 +148,18 @@ def main():
 
             # Save data periodically to free up memory
             if len(data) >= args.save_interval:
-                rows, image_counter = save_data(output_path, data, accelerator, None, image_counter)
+                rows, image_counter = save_data(output_path, data, accelerator, image_counter)
                 all_rows.extend(rows)
                 data = []
 
         # Save remaining data
         if len(data) > 0:
-            rows, _ = save_data(output_path, data, accelerator, None, image_counter)
+            rows, _ = save_data(output_path, data, accelerator, image_counter)
             all_rows.extend(rows)
 
     # Gather all rows from all processes
-    all_gathered_rows = accelerator.gather(all_rows)
+    accelerator.wait_for_everyone()
+    all_gathered_rows = gather_object(all_rows)
 
     # Write to CSV file (only on main process)
     if accelerator.is_main_process:
@@ -166,20 +168,21 @@ def main():
         with open(csv_path, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(['image_filename', 'prompt', 'occupation', 'h_vects_filename', 'face_detected', 'gender_scores'])
-            for rows in all_gathered_rows:
-                csv_writer.writerows(rows)
+            for row in all_gathered_rows:
+                row[4] = int(row[4])  # Turn detected_face boolean to a 0/1 int
+                csv_writer.writerow(row)
 
     print(f"Dataset construction complete, process {accelerator.process_index}")
 
 def create_argparser():
     defaults = dict(
         num_samples=100,
-        batch_size=40,
+        batch_size=32,
         use_fp16=True,
         occupations_file="occupations.json",
         output_dir="output",
         model_id="SG161222/Realistic_Vision_V2.0",
-        save_interval=100,
+        save_interval=1000,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
