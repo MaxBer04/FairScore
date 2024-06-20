@@ -2,6 +2,7 @@
 __pycache__/
 classify_image_graph_def.pb
 
+SD1_5/output
 SD1_5/analysis-q4
 SD1_5/analysis-q2
 SD1_5/output-50k-FF-09T-5it
@@ -12,3 +13,5 @@ SD1_5/aws_accessKeys.csv
 *.zip
 */*.zip
 wandb
+h_vec-dataset-gender-100occs-10k.zip
+h_vec-dataset-gender-100occs-10k.tar

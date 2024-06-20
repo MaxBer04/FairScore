@@ -3,6 +3,8 @@ import argparse
 import shutil
 import boto3
 from tqdm import tqdm
+import tarfile
+import gzip
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,14 +20,43 @@ def compress_dataset(dataset_dir, compressed_file):
         pbar.update(total_files)
     
     print("Dataset compressed successfully.")
+    
+
+import multiprocessing
+
+def fast_compress(dataset_dir, compressed_file):
+    print(f"Compressing dataset directory '{dataset_dir}' to '{compressed_file}'...")
+    compressed_file = f"{compressed_file}.tar"
+    
+    total_size = sum(os.path.getsize(os.path.join(dirpath, filename)) 
+                     for dirpath, dirnames, filenames in os.walk(dataset_dir) 
+                     for filename in filenames)
+    
+    try:
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc="Compressing") as pbar:
+            with tarfile.open(compressed_file, "w") as tar:
+                for root, _, files in os.walk(dataset_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, os.path.dirname(dataset_dir))
+                        tar.add(file_path, arcname=arcname)
+                        pbar.update(os.path.getsize(file_path))
+        
+        print("Dataset compressed successfully.")
+        return compressed_file
+    except Exception as e:
+        print(f"An error occurred during compression: {str(e)}")
+        return None
 
 def upload_to_s3(compressed_file, bucket_name, access_key_id, secret_access_key):
     s3 = boto3.client('s3', aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
-    file_size = os.path.getsize(compressed_file + '.zip')
+    file_size = os.path.getsize(compressed_file)
     print(f"Uploading '{compressed_file}' to S3 bucket '{bucket_name}'...")
     with tqdm(total=file_size, unit='B', unit_scale=True, desc='Uploading') as pbar:
-        s3.upload_file(compressed_file + '.zip', bucket_name, os.path.basename(compressed_file) + '.zip', Callback=lambda bytes_transferred: pbar.update(bytes_transferred))
+        s3.upload_file(compressed_file, bucket_name, os.path.basename(compressed_file), 
+                       Callback=lambda bytes_transferred: pbar.update(bytes_transferred))
     print("Dataset uploaded to S3 successfully.")
+    
 
 def upload_directory_to_s3(directory, bucket_name, access_key_id, secret_access_key):
     s3 = boto3.client('s3', aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
@@ -82,10 +113,11 @@ def download_directory_from_s3(bucket_name, directory, access_key_id, secret_acc
 def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
-    parser.add_argument('--dataset_dir', default='output-50k-FF-09T-5it', help='Directory containing the dataset')
-    parser.add_argument('--compressed_file', default='ms_RV2_37k_gender_FF-Face---09T-5it', help='Name of the compressed file')
+    parser.add_argument('--dataset_dir', default='output', help='Directory containing the dataset')
+    parser.add_argument('--compressed_file', default='h_vec-dataset-gender-100occs-10k', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     parser.add_argument('--no_compress', action='store_true', help='Upload or download the directory without compression')
+    parser.add_argument('--fast_compress', default=True, action='store_true', help='Use a fast compression scheme for datasets with lots of single datapoints')
     args = parser.parse_args()
 
     access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
@@ -97,8 +129,15 @@ def main():
         if args.no_compress:
             upload_directory_to_s3(dataset_path, args.bucket_name, access_key_id, secret_access_key)
         else:
-            compress_dataset(dataset_path, args.compressed_file)
-            upload_to_s3(args.compressed_file, args.bucket_name, access_key_id, secret_access_key)
+            if args.fast_compress:
+                compressed_file = fast_compress(dataset_path, args.compressed_file)
+                if compressed_file:
+                    upload_to_s3(compressed_file, args.bucket_name, access_key_id, secret_access_key)
+                else:
+                    print("Compression failed. Aborting upload.")
+            else:
+                compress_dataset(dataset_path, args.compressed_file)
+                upload_to_s3(f'{args.compressed_file}.zip', args.bucket_name, access_key_id, secret_access_key)
     elif args.action == 'download':
         if args.no_compress:
             download_directory_from_s3(args.bucket_name, dataset_path, access_key_id, secret_access_key)
