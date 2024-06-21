@@ -20,9 +20,6 @@ def compress_dataset(dataset_dir, compressed_file):
         pbar.update(total_files)
     
     print("Dataset compressed successfully.")
-    
-
-import multiprocessing
 
 def fast_compress(dataset_dir, compressed_file):
     print(f"Compressing dataset directory '{dataset_dir}' to '{compressed_file}'...")
@@ -56,7 +53,6 @@ def upload_to_s3(compressed_file, bucket_name, access_key_id, secret_access_key)
         s3.upload_file(compressed_file, bucket_name, os.path.basename(compressed_file), 
                        Callback=lambda bytes_transferred: pbar.update(bytes_transferred))
     print("Dataset uploaded to S3 successfully.")
-    
 
 def upload_directory_to_s3(directory, bucket_name, access_key_id, secret_access_key):
     s3 = boto3.client('s3', aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
@@ -70,23 +66,40 @@ def upload_directory_to_s3(directory, bucket_name, access_key_id, secret_access_
                 s3.upload_file(file_path, bucket_name, s3_path, Callback=lambda bytes_transferred: pbar.update(1))
     print("Directory uploaded to S3 successfully.")
 
-def download_from_s3(bucket_name, compressed_file, access_key_id, secret_access_key):
+def download_from_s3(bucket_name, compressed_file, access_key_id, secret_access_key, fast_compress=False):
     s3 = boto3.client('s3', aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
-    print(f"Downloading '{compressed_file}' from S3 bucket '{bucket_name}'...")
-    with tqdm(unit='B', unit_scale=True, desc='Downloading') as pbar:
-        s3.download_file(bucket_name, compressed_file + '.zip', compressed_file + '.zip', Callback=lambda bytes_transferred: pbar.update(bytes_transferred))
+    file_extension = '.tar' if fast_compress else '.zip'
+    full_filename = compressed_file + file_extension
+    print(f"Downloading '{full_filename}' from S3 bucket '{bucket_name}'...")
+    
+    # Get file size
+    response = s3.head_object(Bucket=bucket_name, Key=full_filename)
+    file_size = int(response['ContentLength'])
+    
+    with tqdm(total=file_size, unit='B', unit_scale=True, desc='Downloading') as pbar:
+        s3.download_file(bucket_name, full_filename, full_filename, 
+                         Callback=lambda bytes_transferred: pbar.update(bytes_transferred))
     print("Dataset downloaded from S3 successfully.")
+    return full_filename
 
-def extract_dataset(compressed_file, dataset_dir):
+def extract_dataset(compressed_file, dataset_dir, fast_compress=False):
     print(f"Extracting '{compressed_file}' to '{dataset_dir}'...")
     
-    def unpack_archive(filename, extract_dir):
-        shutil.unpack_archive(filename, extract_dir)
-    
-    with tqdm(unit='file', desc='Extracting') as pbar:
-        unpack_archive(compressed_file + '.zip', dataset_dir)
-        total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))
-        pbar.update(total_files)
+    if fast_compress:
+        with tarfile.open(compressed_file, 'r') as tar:
+            total_members = len(tar.getmembers())
+            with tqdm(total=total_members, unit='file', desc='Extracting') as pbar:
+                for member in tar.getmembers():
+                    tar.extract(member, path=dataset_dir)
+                    pbar.update(1)
+    else:
+        def unpack_archive(filename, extract_dir):
+            shutil.unpack_archive(filename, extract_dir)
+        
+        with tqdm(unit='file', desc='Extracting') as pbar:
+            unpack_archive(compressed_file, dataset_dir)
+            total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))
+            pbar.update(total_files)
     
     print("Dataset extracted successfully.")
 
@@ -113,7 +126,7 @@ def download_directory_from_s3(bucket_name, directory, access_key_id, secret_acc
 def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
-    parser.add_argument('--dataset_dir', default='output', help='Directory containing the dataset')
+    parser.add_argument('--dataset_dir', default='', help='Directory containing the dataset')
     parser.add_argument('--compressed_file', default='h_vec-dataset-gender-100occs-10k', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     parser.add_argument('--no_compress', action='store_true', help='Upload or download the directory without compression')
@@ -142,8 +155,8 @@ def main():
         if args.no_compress:
             download_directory_from_s3(args.bucket_name, dataset_path, access_key_id, secret_access_key)
         else:
-            download_from_s3(args.bucket_name, args.compressed_file, access_key_id, secret_access_key)
-            extract_dataset(args.compressed_file, dataset_path)
+            downloaded_file = download_from_s3(args.bucket_name, args.compressed_file, access_key_id, secret_access_key, args.fast_compress)
+            extract_dataset(downloaded_file, dataset_path, args.fast_compress)
 
 if __name__ == '__main__':
     main()

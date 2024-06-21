@@ -70,6 +70,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     """
 
     def forward(self, x, emb):
+        print(x.size(), emb.size())
         for layer in self:
             if isinstance(layer, TimestepBlock):
                 x = layer(x, emb)

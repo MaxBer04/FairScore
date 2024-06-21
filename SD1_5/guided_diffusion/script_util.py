@@ -24,12 +24,12 @@ def diffusion_defaults():
     )
 
 
-def classifier_defaults(out_channels=1000, in_channels=4):
+def classifier_defaults(image_size=64, out_channels=1000, in_channels=4):
     """
     Defaults for classifier models.
     """
     return dict(
-        image_size=64,
+        image_size=image_size,
         classifier_use_fp16=False,
         classifier_width=128,
         classifier_depth=2,
@@ -280,6 +280,8 @@ def create_classifier(
     attention_ds = []
     for res in classifier_attention_resolutions.split(","):
         attention_ds.append(image_size // int(res))
+        
+    print(in_channels, classifier_width, out_channels, classifier_depth, attention_ds, channel_mult, classifier_resblock_updown)
 
     return EncoderUNetModel(
         image_size=image_size,

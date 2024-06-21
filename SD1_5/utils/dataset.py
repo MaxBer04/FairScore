@@ -1,5 +1,7 @@
 import os
 import torch as th
+import csv
+import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 from PIL import Image
@@ -22,6 +24,40 @@ def read_csv_with_commas(file_path, occupation):
         prompts.append((normal_prompt, sensitive_prompt))
 
     return prompts
+
+class HVectsDataset(Dataset):
+    def __init__(self, data_dir):
+        self.data_dir = data_dir
+        self.metadata = []
+        self.h_vects_dir = os.path.join(data_dir, 'h_vects')
+        
+        with open(os.path.join(data_dir, 'metadata.csv'), 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row['face_detected'] == '1':
+                    self.metadata.append(row)
+
+    def __len__(self):
+        return len(self.metadata) * 50  # 50 h_vects per image
+
+    def __getitem__(self, idx):
+        image_idx = idx // 50
+        h_vect_idx = idx % 50
+        
+        metadata = self.metadata[image_idx]
+        h_vects_file = os.path.join(self.h_vects_dir, metadata['h_vects_filename'])
+        h_vects = np.load(h_vects_file)
+        
+        timestep = list(h_vects.keys())[h_vect_idx]
+        h_vect = h_vects[timestep]
+        
+        gender_scores = [float(score) for score in metadata['gender_scores'].split(',')]
+        
+        return {
+            'h_vect': th.from_numpy(h_vect).float(),
+            'timestep': th.tensor(int(timestep)).long(),
+            'gender_scores': th.tensor(gender_scores).float()
+        }
 
 class MinorityScoreDataset(Dataset):
     def __init__(self, data_dir, num_quantiles):
