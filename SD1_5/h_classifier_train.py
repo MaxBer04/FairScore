@@ -68,7 +68,6 @@ def main():
             settings=wandb.Settings(start_method="fork")
         )
         # Define custom x-axis metric
-        wandb.define_metric(f"train_samples_processed", step_metric="train_progress")
         wandb.define_metric(f"val_samples_processed", step_metric="val_progress")
 
     if accelerator.is_main_process:
@@ -119,8 +118,6 @@ def main():
                 wandb.log({
                     f"{prefix}_batch_loss": loss.item(),
                     f"{prefix}_batch_acc": acc.item(),
-                    f"{prefix}_samples_processed": samples_seen,
-                    f"{prefix}_progress": samples_seen / total_samples
                 })
 
         progress_bar.close()
@@ -128,13 +125,13 @@ def main():
         avg_loss = total_loss / num_batches
         avg_acc = total_acc / num_batches
 
-        if accelerator.is_main_process:
-            wandb.log({
-                f"{prefix}_epoch_loss": avg_loss,
-                f"{prefix}_epoch_acc": avg_acc,
-                f"{prefix}_samples_processed": samples_seen,
-                f"{prefix}_progress": 1.0
-            })
+        #if accelerator.is_main_process:
+            #wandb.log({
+                #f"{prefix}_epoch_loss": avg_loss,
+                #f"{prefix}_epoch_acc": avg_acc,
+                #f"{prefix}_samples_processed": samples_seen,
+                #f"{prefix}_progress": 1.0
+            #})
 
         return avg_loss, avg_acc
 
@@ -142,7 +139,7 @@ def main():
     if args.resume_from_checkpoint:
         start_epoch = int(args.resume_from_checkpoint.split("_")[-1].split(".")[0])
 
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(start_epoch+1, args.epochs):
         if accelerator.is_main_process:
             logger.log(f"Epoch {epoch}")
         model.train()
@@ -169,8 +166,8 @@ def create_argparser():
     defaults.update(dict(
         data_dir="output",
         lr=1e-5,
-        batch_size=512,#32768,
-        epochs=4,
+        batch_size=8192*2,
+        epochs=20,
         latents_size=8,
         out_channels=2,
         in_channels=2560,
