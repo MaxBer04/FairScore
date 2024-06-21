@@ -115,7 +115,7 @@ def main():
             progress_bar.update(samples_in_batch * accelerator.num_processes)
 
             # Log to wandb more frequently
-            if accelerator.is_main_process and batch_idx % 10 == 0:  # Log every 10 batches
+            if accelerator.is_main_process:  # Log every 10 batches
                 wandb.log({
                     f"{prefix}_batch_loss": loss.item(),
                     f"{prefix}_batch_acc": acc.item(),
@@ -169,13 +169,13 @@ def create_argparser():
     defaults.update(dict(
         data_dir="output",
         lr=1e-5,
-        batch_size=32768,
+        batch_size=512,#32768,
         epochs=4,
         latents_size=8,
         out_channels=2,
         in_channels=2560,
         use_fp16=False,
-        save_interval=4,
+        save_interval=1,
         train_split=0.9,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
