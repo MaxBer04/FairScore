@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, Optional, Union, List, Tuple
 
 import torch
+import torch.nn.functional as F
 from diffusers import StableDiffusionPipeline, AutoencoderKL, UNet2DConditionModel
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
@@ -469,9 +470,8 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 h_vect = unet_results[1]
                 h_vects[int(t)] = h_vect
                 
-                classification = torch.softmax(self.classifier(h_vect, [t])[0], dim=0)
-                probabilities = classification / classification.sum()
-                print(f"{i}: {probabilities}, {classification}")
+                probabilities = F.softmax(self.classifier(h_vect, [t])[0], dim=0)
+                print(f"{i}: {probabilities}")
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
