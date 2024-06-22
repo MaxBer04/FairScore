@@ -296,7 +296,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
             prefix="eval",
         )
         
-        state_dict = torch.load('/root/FairScore/model.pt', map_location=self.device)
+        state_dict = torch.load('/root/FairScore/model_114.pt', map_location=self.device)
         new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         self.classifier.load_state_dict(new_state_dict)
         self.classifier.to(self.device)

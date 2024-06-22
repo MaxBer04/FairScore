@@ -3,18 +3,13 @@ from accelerate import Accelerator
 from torchvision.transforms import ToTensor
 from torchvision.utils import save_image
 import numpy as np
+from collections import Counter
 
 from utils.custom_pipe import HDiffusionPipeline
 
 def analyze_gender_predictions(probs_list, prompt_genders):
-    # Konvertiere die Liste von Tensoren in einen einzigen Tensor
     probs = th.stack(probs_list)
     
-    def calculate_accuracy(predictions, truths):
-        correct = sum((pred == truth) for pred, truth in zip(predictions, truths))
-        undecided = sum((pred == "undecided") for pred in predictions)
-        return correct, undecided, len(truths)
-
     def get_prediction(male_prob, female_prob):
         if abs(male_prob - female_prob) < 0.1:  # 55% - 45% = 10%
             return "undecided"
@@ -22,23 +17,52 @@ def analyze_gender_predictions(probs_list, prompt_genders):
 
     num_steps, num_images, _ = probs.shape
     
-    # Gesamtanalyse
-    avg_probs = probs.mean(dim=0)
-    predictions = [get_prediction(male_prob, female_prob) for male_prob, female_prob in avg_probs]
-    correct, undecided, total = calculate_accuracy(predictions, prompt_genders)
+    # Summe der Ergebnisse über alle Zeitschritte
+    all_predictions = []
+    for img in range(num_images):
+        img_predictions = [get_prediction(male_prob, female_prob) for male_prob, female_prob in probs[:, img, :]]
+        prediction_counts = Counter(img_predictions)
+        all_predictions.append(prediction_counts)
 
-    print("\n--- Gesamtanalyse (alle Zeitschritte) ---")
+    final_predictions = []
+    for pred_count in all_predictions:
+        if pred_count['male'] > pred_count['female']:
+            final_predictions.append('male')
+        elif pred_count['female'] > pred_count['male']:
+            final_predictions.append('female')
+        else:
+            final_predictions.append('undecided')
+
+    correct = sum((pred == truth) for pred, truth in zip(final_predictions, prompt_genders))
+    undecided = sum((pred == "undecided") for pred in final_predictions)
+    total = len(prompt_genders)
+
+    print("\n--- Gesamtanalyse (Summe über alle Zeitschritte) ---")
     print(f"Korrekt: {correct}/{total} ({correct/total*100:.2f}%)")
     print(f"Unentschieden: {undecided}/{total} ({undecided/total*100:.2f}%)")
     
-    for i, (pred, truth, prob) in enumerate(zip(predictions, prompt_genders, avg_probs)):
+    for i, (pred, truth, counts) in enumerate(zip(final_predictions, prompt_genders, all_predictions)):
         print(f"Bild {i+1}: Vorhersage={pred}, {truth}, "
-              f"m {prob[0]*100:.2f}% - w {prob[1]*100:.2f}%")
+              f"m {counts['male']} - w {counts['female']} - u {counts['undecided']}")
 
     # Analyse der ersten 15 Zeitschritte
-    avg_probs_15 = probs[:15].mean(dim=0)
-    predictions_15 = [get_prediction(male_prob, female_prob) for male_prob, female_prob in avg_probs_15]
-    correct_15, undecided_15, _ = calculate_accuracy(predictions_15, prompt_genders)
+    all_predictions_15 = []
+    for img in range(num_images):
+        img_predictions = [get_prediction(male_prob, female_prob) for male_prob, female_prob in probs[:15, img, :]]
+        prediction_counts = Counter(img_predictions)
+        all_predictions_15.append(prediction_counts)
+
+    final_predictions_15 = []
+    for pred_count in all_predictions_15:
+        if pred_count['male'] > pred_count['female']:
+            final_predictions_15.append('male')
+        elif pred_count['female'] > pred_count['male']:
+            final_predictions_15.append('female')
+        else:
+            final_predictions_15.append('undecided')
+
+    correct_15 = sum((pred == truth) for pred, truth in zip(final_predictions_15, prompt_genders))
+    undecided_15 = sum((pred == "undecided") for pred in final_predictions_15)
 
     print("\n--- Analyse der ersten 15 Zeitschritte ---")
     print(f"Korrekt: {correct_15}/{total} ({correct_15/total*100:.2f}%)")
@@ -48,7 +72,7 @@ def analyze_gender_predictions(probs_list, prompt_genders):
     accuracies = []
     for step in range(num_steps):
         step_preds = [get_prediction(male_prob, female_prob) for male_prob, female_prob in probs[step]]
-        correct_step, _, _ = calculate_accuracy(step_preds, prompt_genders)
+        correct_step = sum((pred == truth) for pred, truth in zip(step_preds, prompt_genders))
         accuracies.append(correct_step / total * 100)
 
     print("\n--- Genauigkeit pro Zeitschritt ---")
@@ -86,7 +110,7 @@ def main():
     m_mult = 8
     w_mult = 8
     
-    images, h_vects, probs = pipe(["A photo of the face of a female dermatologist"]*w_mult+["A photo of the face of a male dermatologist"]*m_mult, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
+    images, h_vects, probs = pipe(["A photo of the face of a female scientist"]*w_mult+["A photo of the face of a male scientist"]*m_mult, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
 
     # Umwandlung der Bilder in Tensoren
     tensor_images = [ToTensor()(img) for img in images]
