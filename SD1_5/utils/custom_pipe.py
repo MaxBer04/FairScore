@@ -296,7 +296,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
             prefix="eval",
         )
         
-        state_dict = torch.load('/root/FairScore/model_114.pt', map_location=self.device)
+        state_dict = torch.load('/root/FairScore/model.pt', map_location=self.device)
         new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         self.classifier.load_state_dict(new_state_dict)
         self.classifier.to(self.device)
@@ -470,8 +470,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 )
                 noise_pred = unet_results[0]
                 h_vect = unet_results[1]
-                h_vects[int(t)] = h_vect
-                h_vect = h_vect.reshape(-1, 2, *h_vect.shape[1:])
+                h_vects[int(t)] = h_vect.reshape(-1, 2, *h_vect.shape[1:])
                 
                 res = self.classifier(h_vect, [t]*h_vect.shape[0])
                 probabilities = F.softmax(res, dim=1)

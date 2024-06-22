@@ -83,7 +83,7 @@ def main():
                 gender_scores = batch['gender_scores']
 
                 logits = model(h_vect, timesteps)
-                loss = F.cross_entropy(logits, gender_scores.argmax(dim=-1))
+                loss = F.cross_entropy(logits, gender_scores)
 
                 predicted_gender = logits.argmax(dim=-1)
                 true_gender = gender_scores.argmax(dim=-1)
@@ -168,7 +168,7 @@ def create_argparser():
         train_split=0.9,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='model_95.pt',
+        resume_from_checkpoint='model_97.pt',
         combine_vectors=False,
     ))
     parser = argparse.ArgumentParser()
