@@ -469,7 +469,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 h_vect = unet_results[1]
                 h_vects[int(t)] = h_vect
                 
-                classification = self.classifier(h_vect, [t])[0]
+                classification = torch.softmax(self.classifier(h_vect, [t])[0], dim=0)
                 probabilities = classification / classification.sum()
                 print(f"{i}: {probabilities}, {classification}")
 
