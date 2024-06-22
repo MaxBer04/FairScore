@@ -20,8 +20,9 @@ class GenderClassifier(nn.Module):
         
     def forward(self, x, t):
         if not self.combine_vectors:
-            x = x[:, 1]  # Take only the second vector if not combining
-        
+            #x = x[:, 1]  # Take only the second vector if not combining
+            x = x[1].unsqueeze(0)
+    
         x = x.reshape(x.shape[0], -1)
         
         # Handle batch of timesteps

@@ -127,7 +127,7 @@ def main():
     parser = argparse.ArgumentParser(description='Dataset Compression and S3 Uploader/Downloader')
     parser.add_argument('action', choices=['upload', 'download'], help='Action to perform: upload or download')
     parser.add_argument('--dataset_dir', default='', help='Directory containing the dataset')
-    parser.add_argument('--compressed_file', default='h_vec-dataset-gender-100occs-10k', help='Name of the compressed file')
+    parser.add_argument('--compressed_file', default='newest-model', help='Name of the compressed file')
     parser.add_argument('--bucket_name', default="masterarbeit-2", help='Name of the S3 bucket')
     parser.add_argument('--no_compress', action='store_true', help='Upload or download the directory without compression')
     parser.add_argument('--fast_compress', default=True, action='store_true', help='Use a fast compression scheme for datasets with lots of single datapoints')

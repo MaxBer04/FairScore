@@ -20,8 +20,9 @@ from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPV
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionOutput
 from diffusers.utils import USE_PEFT_BACKEND, scale_lora_layers, unscale_lora_layers
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+
+from utils.classifier import make_model
 
 class HUNet2DConditionModel(UNet2DConditionModel):
     def __init__(self):
@@ -284,6 +285,20 @@ class HDiffusionPipeline(StableDiffusionPipeline):
         super().__init__(vae, text_encoder, tokenizer, unet, scheduler, safety_checker, feature_extractor, image_encoder,
                          requires_safety_checker)
         
+    
+    def init_classifier(self):
+        self.classifier = make_model(
+            in_channels=2560,
+            image_size=8,
+            out_channels=2,
+            combine_vectors=False
+        )
+        
+        state_dict = torch.load('/root/FairScore/model.pt', map_location=self.device)
+        new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        self.classifier.load_state_dict(new_state_dict)
+        self.classifier.to(self.device)
+        
 
     @torch.no_grad()
     def __call__(
@@ -453,6 +468,10 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 noise_pred = unet_results[0]
                 h_vect = unet_results[1]
                 h_vects[int(t)] = h_vect
+                
+                classification = self.classifier(h_vect, [t])[0]
+                probabilities = classification / classification.sum()
+                print(f"{i}: {probabilities}, {classification}")
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
