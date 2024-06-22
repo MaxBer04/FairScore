@@ -159,7 +159,7 @@ def create_argparser():
         data_dir="output",
         lr=1e-5,
         batch_size=8192*2,
-        epochs=100,
+        epochs=200,
         latents_size=8,
         out_channels=2,
         in_channels=2560,
@@ -168,7 +168,7 @@ def create_argparser():
         train_split=0.9,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='model_19.pt',
+        resume_from_checkpoint='model_95.pt',
         combine_vectors=False,
     ))
     parser = argparse.ArgumentParser()

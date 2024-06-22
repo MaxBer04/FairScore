@@ -8,7 +8,7 @@ TIMESTEPS = [981, 961, 941, 921, 901, 881, 861, 841, 821, 801, 781, 761, 741,
              161, 141, 121, 101, 81, 61, 41, 21, 1]
 
 class GenderClassifier(nn.Module):
-    def __init__(self, in_channels, image_size, out_channels, combine_vectors=False):
+    def __init__(self, in_channels, image_size, out_channels, combine_vectors=False, prefix=None):
         super().__init__()
         self.combine_vectors = combine_vectors
         if combine_vectors:
@@ -17,12 +17,11 @@ class GenderClassifier(nn.Module):
             self.input_dim = (in_channels // 2) * image_size * image_size
         
         self.linears = nn.ModuleList([nn.Linear(self.input_dim, out_channels) for _ in range(50)])
+        self.prefix = prefix
         
     def forward(self, x, t):
         if not self.combine_vectors:
-            #x = x[:, 1]  # Activate this for training
-            x = x[1].unsqueeze(0) # Activate this for inference
-    
+            x = x[:, 1] 
         x = x.reshape(x.shape[0], -1)
         
         # Handle batch of timesteps
@@ -35,5 +34,5 @@ class GenderClassifier(nn.Module):
         
         return torch.cat(outputs, dim=0)
 
-def make_model(in_channels, image_size, out_channels, combine_vectors=False):
-    return GenderClassifier(in_channels, image_size, out_channels, combine_vectors)
+def make_model(in_channels, image_size, out_channels, combine_vectors=False, prefix="train"):
+    return GenderClassifier(in_channels, image_size, out_channels, combine_vectors, prefix)

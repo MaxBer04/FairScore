@@ -292,7 +292,8 @@ class HDiffusionPipeline(StableDiffusionPipeline):
             in_channels=2560,
             image_size=8,
             out_channels=2,
-            combine_vectors=False
+            combine_vectors=False,
+            prefix="eval",
         )
         
         state_dict = torch.load('/root/FairScore/model.pt', map_location=self.device)
@@ -447,6 +448,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
         h_vects = {}
+        probs = []
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -469,9 +471,12 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 noise_pred = unet_results[0]
                 h_vect = unet_results[1]
                 h_vects[int(t)] = h_vect
+                h_vect = h_vect.reshape(-1, 2, *h_vect.shape[1:])
                 
-                probabilities = F.softmax(self.classifier(h_vect, [t])[0], dim=0)
-                print(f"{i}: {probabilities}")
+                res = self.classifier(h_vect, [t]*h_vect.shape[0])
+                probabilities = F.softmax(res, dim=1)
+                #print(f"{i}: {probabilities}")
+                probs.append(probabilities)
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
@@ -522,7 +527,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
         self.maybe_free_model_hooks()
 
         if not return_dict:
-            return (image, h_vects)
+            return (image, h_vects, probs)
 
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
 
