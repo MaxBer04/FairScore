@@ -287,7 +287,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                          requires_safety_checker)
         
     
-    def init_classifier(self):
+    def init_classifier(self, classifier_path):
         self.classifier = make_model(
             in_channels=2560,
             image_size=8,
@@ -296,7 +296,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
             prefix="eval",
         )
         
-        state_dict = torch.load('/root/FairScore/model.pt', map_location=self.device)
+        state_dict = torch.load(classifier_path, map_location=self.device)
         new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         self.classifier.load_state_dict(new_state_dict)
         self.classifier.to(self.device)
@@ -470,7 +470,8 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 )
                 noise_pred = unet_results[0]
                 h_vect = unet_results[1]
-                h_vects[int(t)] = h_vect.reshape(-1, 2, *h_vect.shape[1:])
+                h_vect = h_vect.reshape(-1, 2, *h_vect.shape[1:])
+                h_vects[int(t)] = h_vect
                 
                 res = self.classifier(h_vect, [t]*h_vect.shape[0])
                 probabilities = F.softmax(res, dim=1)

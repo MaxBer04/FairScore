@@ -21,18 +21,21 @@ class GenderClassifier(nn.Module):
         
     def forward(self, x, t):
         if not self.combine_vectors:
-            x = x[:, 1] 
+            x = x[:, 1]
         x = x.reshape(x.shape[0], -1)
         
-        # Handle batch of timesteps
-        outputs = []
-        for i in range(x.shape[0]):
-            timestep = t[i].item()
-            timestep_index = TIMESTEPS.index(timestep)
-            output = self.linears[timestep_index](x[i].unsqueeze(0))
-            outputs.append(output)
+        # Batch-Verarbeitung
+        timestep_indices = torch.tensor([TIMESTEPS.index(ti.item()) for ti in t], device=x.device)
+        batch_size = x.shape[0]
         
-        return torch.cat(outputs, dim=0)
+        # Wählen Sie die entsprechenden linearen Layer für jeden Zeitschritt aus
+        selected_linears = torch.stack([self.linears[i].weight for i in timestep_indices])
+        selected_biases = torch.stack([self.linears[i].bias for i in timestep_indices])
+        
+        # Führen Sie die Batch-Matrix-Multiplikation durch
+        output = torch.bmm(x.unsqueeze(1), selected_linears.transpose(1, 2)).squeeze(1) + selected_biases
+        
+        return output
 
 def make_model(in_channels, image_size, out_channels, combine_vectors=False, prefix="train"):
     return GenderClassifier(in_channels, image_size, out_channels, combine_vectors, prefix)

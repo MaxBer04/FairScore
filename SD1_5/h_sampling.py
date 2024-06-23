@@ -105,12 +105,13 @@ def main():
     # Move the model to device before preparing
     pipe = pipe.to(accelerator.device)
     pipe = accelerator.prepare(pipe)
-    pipe.init_classifier()
+    pipe.init_classifier('/root/FairScore/model_108.pt')
     
-    m_mult = 8
-    w_mult = 8
+    m_mult = 32
+    w_mult = 32
     
     images, h_vects, probs = pipe(["A photo of the face of a female scientist"]*w_mult+["A photo of the face of a male scientist"]*m_mult, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
+    print(probs)
 
     # Umwandlung der Bilder in Tensoren
     tensor_images = [ToTensor()(img) for img in images]
