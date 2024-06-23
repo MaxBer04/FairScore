@@ -24,15 +24,12 @@ class GenderClassifier(nn.Module):
             x = x[:, 1]
         x = x.reshape(x.shape[0], -1)
         
-        # Batch-Verarbeitung
         timestep_indices = torch.tensor([TIMESTEPS.index(ti.item()) for ti in t], device=x.device)
         batch_size = x.shape[0]
         
-        # Wählen Sie die entsprechenden linearen Layer für jeden Zeitschritt aus
         selected_linears = torch.stack([self.linears[i].weight for i in timestep_indices])
         selected_biases = torch.stack([self.linears[i].bias for i in timestep_indices])
         
-        # Führen Sie die Batch-Matrix-Multiplikation durch
         output = torch.bmm(x.unsqueeze(1), selected_linears.transpose(1, 2)).squeeze(1) + selected_biases
         
         return output

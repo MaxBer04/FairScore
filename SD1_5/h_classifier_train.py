@@ -158,17 +158,17 @@ def create_argparser():
     defaults.update(dict(
         data_dir="output",
         lr=1e-5,
-        batch_size=8192*2,
+        batch_size=8192*4,
         epochs=200,
         latents_size=8,
         out_channels=2,
         in_channels=2560,
-        use_fp16=False,
+        use_fp16=True,
         save_interval=1,
         train_split=0.9,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='model_97.pt',
+        resume_from_checkpoint='/root/FairScore/model_108.pt',
         combine_vectors=False,
     ))
     parser = argparse.ArgumentParser()

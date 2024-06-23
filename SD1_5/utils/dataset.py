@@ -59,6 +59,7 @@ class HVectsDataset(Dataset):
             'gender_scores': th.tensor(gender_scores).float()
         }
 
+
 class MinorityScoreDataset(Dataset):
     def __init__(self, data_dir, num_quantiles):
         self.data_dir = data_dir
@@ -77,8 +78,7 @@ class MinorityScoreDataset(Dataset):
         return image_tensor, quantile
 
 
-
-class OccupationDataset(th.utils.data.Dataset):
+class OccupationDataset(Dataset):
     def __init__(self, data_dir, num_occupations=None):
         self.data_dir = data_dir
         self.occupations = [d for d in os.listdir(self.data_dir) if os.path.isdir(os.path.join(self.data_dir, d))][:num_occupations]
