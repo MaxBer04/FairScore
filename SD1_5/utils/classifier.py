@@ -24,7 +24,7 @@ class GenderClassifier(nn.Module):
             x = x[:, 1]
         x = x.reshape(x.shape[0], -1)
         
-        timestep_indices = torch.tensor([TIMESTEPS.index(ti.item()) for ti in t], device=x.device)
+        timestep_indices = torch.tensor([TIMESTEPS.index(ti.item()) for ti in t], device=x.device)                      
         batch_size = x.shape[0]
         
         selected_linears = torch.stack([self.linears[i].weight for i in timestep_indices])

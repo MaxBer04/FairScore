@@ -2,14 +2,13 @@ import argparse
 import os
 import torch as th
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
 from accelerate import Accelerator
 from guided_diffusion import logger
 from guided_diffusion.script_util import (
     add_dict_to_argparser,
     classifier_and_diffusion_defaults,
 )
-from utils.dataset import HVectsDataset
+from utils.dataset import HVectsDataset, create_data_loaders
 from utils.classifier import make_model
 import wandb
 from tqdm import tqdm
@@ -52,13 +51,9 @@ def main():
         new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         model.load_state_dict(new_state_dict)
     
-    dataset = HVectsDataset(args.data_dir)
-    train_size = int(args.train_split * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+    dataset = HVectsDataset(args.data_dir)
+    train_loader, val_loader = create_data_loaders(dataset, args.batch_size, args.train_split)
 
     opt = th.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -158,17 +153,17 @@ def create_argparser():
     defaults.update(dict(
         data_dir="output",
         lr=1e-5,
-        batch_size=8192*4,
+        batch_size=256,#8192*4,
         epochs=200,
         latents_size=8,
         out_channels=2,
         in_channels=2560,
         use_fp16=True,
         save_interval=1,
-        train_split=0.9,
+        train_split=0.8,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='/root/FairScore/model_108.pt',
+        resume_from_checkpoint='/root/FairScore/model_2.pt',
         combine_vectors=False,
     ))
     parser = argparse.ArgumentParser()

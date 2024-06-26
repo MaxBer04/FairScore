@@ -3,7 +3,7 @@ import torch as th
 import csv
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset, DataLoader
 from PIL import Image
 from torchvision.transforms import ToTensor
 
@@ -25,6 +25,9 @@ def read_csv_with_commas(file_path, occupation):
 
     return prompts
 
+# if idx // 50  == 100:
+#    print(f"Data idx: {idx}, Image idx: {image_idx}, vect idx: {h_vect_idx}")
+
 class HVectsDataset(Dataset):
     def __init__(self, data_dir):
         self.data_dir = data_dir
@@ -38,26 +41,54 @@ class HVectsDataset(Dataset):
                     self.metadata.append(row)
 
     def __len__(self):
-        return len(self.metadata) * 50  # 50 h_vects per image
+        return len(self.metadata)
 
     def __getitem__(self, idx):
-        image_idx = idx // 50
-        h_vect_idx = idx % 50
-        
-        metadata = self.metadata[image_idx]
+        metadata = self.metadata[idx]
         h_vects_file = os.path.join(self.h_vects_dir, metadata['h_vects_filename'])
         h_vects = np.load(h_vects_file)
-        
-        timestep = list(h_vects.keys())[h_vect_idx]
-        h_vect = h_vects[timestep]
         
         gender_scores = [float(score) for score in metadata['gender_scores'].split(',')]
         
         return {
-            'h_vect': th.from_numpy(h_vect).float(),
-            'timestep': th.tensor(int(timestep)).long(),
+            'h_vects': {int(k): th.from_numpy(v).float() for k, v in h_vects.items()},
             'gender_scores': th.tensor(gender_scores).float()
         }
+
+def create_data_loaders(dataset, batch_size, train_split=0.9):
+    train_size = int(train_split * len(dataset))
+    val_size = len(dataset) - train_size
+    
+    indices = list(range(len(dataset)))
+    np.random.shuffle(indices)
+    
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
+    
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    
+    def collate_fn(batch):
+        all_h_vects = []
+        all_timesteps = []
+        all_gender_scores = []
+        
+        for item in batch:
+            for timestep, h_vect in item['h_vects'].items():
+                all_h_vects.append(h_vect)
+                all_timesteps.append(timestep)
+                all_gender_scores.append(item['gender_scores'])
+        
+        return {
+            'h_vect': th.stack(all_h_vects),
+            'timestep': th.tensor(all_timesteps).long(),
+            'gender_scores': th.stack(all_gender_scores)
+        }
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    
+    return train_loader, val_loader
 
 
 class MinorityScoreDataset(Dataset):
