@@ -163,7 +163,7 @@ def create_argparser():
         train_split=0.8,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='/root/FairScore/model_2.pt',
+        resume_from_checkpoint='/root/FairScore/model_71.pt',
         combine_vectors=False,
     ))
     parser = argparse.ArgumentParser()
