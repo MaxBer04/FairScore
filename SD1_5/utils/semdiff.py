@@ -691,13 +691,12 @@ class StableDiffusion(Diffusion):
         if type(etas) in [int, float]: etas = [etas]*self.num_inference_steps
         assert len(etas) == self.num_inference_steps
 
-        xt = torch.cat([xT]*batch_size, dim=0)
+        xt = xT
         hs = torch.zeros(self.h_shape).to(self.device)
-        hs = torch.cat([hs]*batch_size, dim=0)
+        hs = [hs]*batch_size
         self.timesteps = self.timesteps[:len(self.timesteps)-1]
         op = tqdm(self.timesteps) if prog_bar else self.timesteps
         uncond_embedding = self.encode_text([""]*batch_size)
-        print(f"xT: {xT.size()}, hs: {hs.size()}, uncond emb: {uncond_embedding.size()}, text emb: {text_embeddings.size()}")
         
         for t in op:
             idx = self.t_to_idx[int(t)]        
@@ -708,8 +707,9 @@ class StableDiffusion(Diffusion):
             with torch.no_grad():
                 uncond_out = self.unet.forward(xt, timestep =  t, 
                                                encoder_hidden_states = uncond_embedding, delta_h = delta_h)
-            #print(hs.size(), uncond_out.h.squeeze().size())
-            hs[idx] = uncond_out.h.squeeze()
+
+            for idx in range(len(hs)):
+              hs[idx] = uncond_out.h.squeeze()[idx]
 
              ## Conditional embedding  
             if prompts:  
@@ -1062,10 +1062,11 @@ class StableSemanticDiffusion(SemanticDiffusion):
                                                    prompts=q.prompts,
                                                    etas= q.etas,
                                                    delta_hs = q.delta_hs, 
-                                                   asyrp=q.asyrp,
-                                                   **kwargs)
+                                                   asyrp=q.asyrp)
         with autocast("cuda"), inference_mode():
-            q.x0 = self.vae.decode(1 / 0.18215 * q.w0).sample
+            #1 / 0.18215
+            q.x0 = self.vae.decode(q.w0 / self.vae.config.scaling_factor).sample
+            q.x0 = (q.x0 / 2 + 0.5).clamp(0, 1)
         
         return q 
         

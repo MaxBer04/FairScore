@@ -124,9 +124,8 @@ def main():
     #m_mult = 8
     #w_mult = 8
     
-    outputs = pipe.sample(prompt = ["A photo of the face of a police officer"]*2)
+    outputs = pipe.sample(prompts = ["A photo of the face of a geoscientist"]*10)
     save_image(outputs.x0, "x0.png")
-    print(outputs.hs.size())
 
     # Umwandlung der Bilder in Tensoren
     #tensor_images = [ToTensor()(img) for img in images]
