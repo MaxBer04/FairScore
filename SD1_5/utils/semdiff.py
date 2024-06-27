@@ -979,8 +979,8 @@ class SemanticDiffusion(Interpolations):
             q = self.decode(q,**kwargs)
         return q
 
-    def sample_variance_noise(self, seed=None):
-        return self.diff.sample_variance_noise(seed = seed)
+    def sample_variance_noise(self, num_samples = 1, seed=None):
+        return self.diff.sample_variance_noise(num_samples = num_samples, seed = seed)
     
     def apply_direction(self, q, n, scale = 1, space = "hspace"): 
         q_edit = q.copy()   
@@ -1093,7 +1093,7 @@ class StableSemanticDiffusion(SemanticDiffusion):
             if variance_seed is None:
                 variance_seed = seed + 1 
 
-            q.zs = self.sample_variance_noise(seed = variance_seed) 
+            q.zs = self.sample_variance_noise(num_samples=len(prompts), seed = variance_seed) 
           
         if decode: 
             q = self.decode(q,**kwargs)
