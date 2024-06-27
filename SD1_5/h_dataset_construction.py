@@ -198,7 +198,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        num_samples=100,
+        num_samples=200,
         batch_size=10,
         use_fp16=True,
         occupations_file="occupations.json",
