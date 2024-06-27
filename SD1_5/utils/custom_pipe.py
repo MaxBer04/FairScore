@@ -475,7 +475,7 @@ class HDiffusionPipeline(StableDiffusionPipeline):
                 
                 res = self.classifier(h_vect, [t]*h_vect.shape[0])
                 probabilities = F.softmax(res, dim=1)
-                #print(f"{i}: {probabilities}")
+                print(f"{i}: {probabilities}")
                 probs.append(probabilities)
 
                 # perform guidance

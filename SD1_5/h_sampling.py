@@ -6,6 +6,8 @@ import numpy as np
 from collections import Counter
 
 from utils.custom_pipe import HDiffusionPipeline
+from utils.semdiff import StableSemanticDiffusion, ConditionalUnet
+from diffusers import StableDiffusionPipeline
 
 def analyze_gender_predictions(probs_list, prompt_genders):
     probs = th.stack(probs_list)
@@ -48,7 +50,7 @@ def analyze_gender_predictions(probs_list, prompt_genders):
     # Analyse der ersten 15 Zeitschritte
     all_predictions_15 = []
     for img in range(num_images):
-        img_predictions = [get_prediction(male_prob, female_prob) for male_prob, female_prob in probs[:15, img, :]]
+        img_predictions = [get_prediction(male_prob, female_prob) for male_prob, female_prob in probs[15:, img, :]]
         prediction_counts = Counter(img_predictions)
         all_predictions_15.append(prediction_counts)
 
@@ -64,7 +66,7 @@ def analyze_gender_predictions(probs_list, prompt_genders):
     correct_15 = sum((pred == truth) for pred, truth in zip(final_predictions_15, prompt_genders))
     undecided_15 = sum((pred == "undecided") for pred in final_predictions_15)
 
-    print("\n--- Analyse der ersten 15 Zeitschritte ---")
+    print("\n--- Analyse der letzten 15 Zeitschritte ---")
     print(f"Korrekt: {correct_15}/{total} ({correct_15/total*100:.2f}%)")
     print(f"Unentschieden: {undecided_15}/{total} ({undecided_15/total*100:.2f}%)")
 
@@ -100,31 +102,44 @@ def main():
     accelerator = Accelerator()
   
     model_id = "SG161222/Realistic_Vision_V2.0"
-    pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if use_fp16 else th.float32)
+    #pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if use_fp16 else th.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id).to(accelerator.device) #use_auth_token=True
+    scheduler = pipe.scheduler
+
+    pipe = StableSemanticDiffusion(
+        unet=ConditionalUnet(pipe.unet),
+        scheduler=scheduler,#DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False),
+        vae = pipe.vae,
+        tokenizer = pipe.tokenizer,
+        text_encoder = pipe.text_encoder,
+        model_id = model_id,
+        num_inference_steps=50
+    )
     
     # Move the model to device before preparing
-    pipe = pipe.to(accelerator.device)
-    pipe = accelerator.prepare(pipe)
-    pipe.init_classifier('/root/FairScore/model_108.pt')
+    #pipe = pipe.to(accelerator.device)
+    #pipe = accelerator.prepare(pipe)
+    #pipe.init_classifier('/root/FairScore/model_199.pt')
     
-    m_mult = 32
-    w_mult = 32
+    #m_mult = 8
+    #w_mult = 8
     
-    images, h_vects, probs = pipe(["A photo of the face of a female scientist"]*w_mult+["A photo of the face of a male scientist"]*m_mult, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
-    print(probs)
+    outputs = pipe.sample(prompt = ["A photo of the face of a police officer"]*2)
+    save_image(outputs.x0, "x0.png")
+    print(outputs.hs.size())
 
     # Umwandlung der Bilder in Tensoren
-    tensor_images = [ToTensor()(img) for img in images]
+    #tensor_images = [ToTensor()(img) for img in images]
 
     # Concatenation der Bilder entlang der Batch-Dimension (0-Achse)
-    images = th.cat([img.unsqueeze(0) for img in tensor_images], dim=0)
+    #images = th.cat([img.unsqueeze(0) for img in tensor_images], dim=0)
 
     # Speichern des Bildes
-    save_image(images, "test.png")
+    #save_image(images, "test.png")
     
     # Analyse der Gendervorhersagen
-    prompt_genders = ["female"] * w_mult + ["male"] * m_mult
-    analyze_gender_predictions(probs, prompt_genders)
+    #prompt_genders = ["female"] * w_mult + ["male"] * m_mult
+    #analyze_gender_predictions(probs, prompt_genders)
     
 if __name__ == "__main__":
     main()
