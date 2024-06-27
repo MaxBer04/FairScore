@@ -203,7 +203,7 @@ def create_argparser():
         use_fp16=True,
         occupations_file="occupations.json",
         output_dir="output",
-        model_id="runwayml/stable-diffusion-v1-5", #"SG161222/Realistic_Vision_V2.0",
+        model_id="SG161222/Realistic_Vision_V2.0", #"runwayml/stable-diffusion-v1-5",
         save_interval=10,
     )
     parser = argparse.ArgumentParser()
