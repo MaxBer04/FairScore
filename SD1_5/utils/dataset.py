@@ -1,4 +1,6 @@
 import os
+import re
+import random
 import torch as th
 import csv
 import numpy as np
@@ -25,14 +27,17 @@ def read_csv_with_commas(file_path, occupation):
 
     return prompts
 
-# if idx // 50  == 100:
-#    print(f"Data idx: {idx}, Image idx: {image_idx}, vect idx: {h_vect_idx}")
+def extract_gender_tensor(prompt):
+    gender = re.search(r'{(male|female)}', prompt).group(1)
+    high_value = random.uniform(0.9, 1.0)
+    return th.tensor([high_value, 1 - high_value] if gender == 'male' else [1 - high_value, high_value])
 
 class HVectsDataset(Dataset):
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, enable_hard_labels):
         self.data_dir = data_dir
         self.metadata = []
         self.h_vects_dir = os.path.join(data_dir, 'h_vects')
+        self.enable_hard_labels = enable_hard_labels
         
         with open(os.path.join(data_dir, 'metadata.csv'), 'r') as f:
             reader = csv.DictReader(f)
@@ -48,7 +53,10 @@ class HVectsDataset(Dataset):
         h_vects_file = os.path.join(self.h_vects_dir, metadata['h_vects_filename'])
         h_vects = np.load(h_vects_file)
         
-        gender_scores = [float(score) for score in metadata['gender_scores'].split(',')]
+        if self.enable_hard_labels:
+            gender_scores = extract_gender_tensor(metadata["prompt"])
+        else:
+            gender_scores = [float(score) for score in metadata['gender_scores'].split(',')]
         
         return {
             'h_vects': {int(k): th.from_numpy(v).float() for k, v in h_vects.items()},
