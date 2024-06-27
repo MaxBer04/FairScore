@@ -681,7 +681,7 @@ class StableDiffusion(Diffusion):
                         prog_bar = True,
                         zs = None,
                         delta_hs = None,
-                        asyrp = False):
+                        asyrp = False,):
         
 
         text_embeddings = self.encode_text(prompts)
@@ -1057,13 +1057,14 @@ class StableSemanticDiffusion(SemanticDiffusion):
         self.h_space = self.diff.unet.h_space
         self.set_inference_steps(num_inference_steps = num_inference_steps)
         
-    def decode(self, q, **kwargs):
+    def decode(self, q, enable_prog_bar, **kwargs):
         q.w0, q.hs, q.zs= self.diff.reverse_process(q.wT,
                                                    zs = q.zs,
                                                    prompts=q.prompts,
                                                    etas= q.etas,
                                                    delta_hs = q.delta_hs, 
-                                                   asyrp=q.asyrp)
+                                                   asyrp=q.asyrp,
+                                                   prog_bar=enable_prog_bar)
         with autocast("cuda"), inference_mode():
             #1 / 0.18215
             q.x0 = self.vae.decode(q.w0 / self.vae.config.scaling_factor).sample
@@ -1082,7 +1083,8 @@ class StableSemanticDiffusion(SemanticDiffusion):
                seed=None,
                prompts = [""],
                variance_seed = None,
-               etas=None, **kwargs):
+               etas=None, 
+               enable_prog_bar=True, **kwargs):
         """
         Samples random noise in the dimensions of the Unet
         """
@@ -1099,5 +1101,5 @@ class StableSemanticDiffusion(SemanticDiffusion):
             q.zs = self.sample_variance_noise(num_samples=len(prompts), seed = variance_seed) 
           
         if decode: 
-            q = self.decode(q,**kwargs)
+            q = self.decode(q, enable_prog_bar, **kwargs)
         return q

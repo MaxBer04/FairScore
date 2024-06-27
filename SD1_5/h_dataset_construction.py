@@ -49,7 +49,7 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
     batch_data = []
 
     with th.no_grad():
-        outputs = pipe.sample(prompts=prompts)
+        outputs = pipe.sample(prompts=prompts, enable_prog_bar=not accelerator.is_main_process)
         #images, h_vects = pipe(prompts, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
         images = outputs.x0
         h_vects = outputs.hs
@@ -139,8 +139,8 @@ def main():
     #pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if args.use_fp16 else th.float32)
     #pipe = pipe.to(accelerator.device)
     
-    if not accelerator.is_main_process:
-        pipe.set_progress_bar_config(disable=True)
+    #if not accelerator.is_main_process:
+    #    pipe.diff.set_progress_bar_config(disable=True)
 
     accelerator.print("Creating dataset...")
     occupations = load_occupations(os.path.join(script_dir, args.occupations_file))
@@ -164,11 +164,9 @@ def main():
         for i in tqdm(range(0, len(local_prompts), args.batch_size), desc="Processing batches", disable=not accelerator.is_main_process):
             batch_prompts = local_prompts[i:i+args.batch_size]
             batch_data = process_batch(args, batch_prompts, pipe, fairface, accelerator, mtcnn)
-            print(len(batch_data))
             data.extend(batch_data)
 
             # Save data periodically to free up memory
-            print(f"Items: {len(data)}")
             if len(data) >= args.save_interval:
                 rows, image_counter = save_data(output_path, data, accelerator, image_counter)
                 all_rows.extend(rows)
@@ -199,12 +197,12 @@ def main():
 def create_argparser():
     defaults = dict(
         num_samples=200,
-        batch_size=10,
+        batch_size=8,
         use_fp16=True,
         occupations_file="occupations.json",
         output_dir="output",
         model_id="SG161222/Realistic_Vision_V2.0", #"runwayml/stable-diffusion-v1-5",
-        save_interval=10,
+        save_interval=16,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():
