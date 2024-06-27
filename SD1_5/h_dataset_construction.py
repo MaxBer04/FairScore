@@ -13,6 +13,9 @@ from facenet_pytorch import MTCNN
 from utils.custom_pipe import HDiffusionPipeline
 from accelerate.utils import gather_object
 
+from utils.semdiff import StableSemanticDiffusion, ConditionalUnet
+from diffusers import StableDiffusionPipeline, DDIMScheduler
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..'))
 sys.path.insert(0, project_root)
@@ -46,7 +49,10 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
     batch_data = []
 
     with th.no_grad():
-        images, h_vects = pipe(prompts, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
+        outputs = pipe.sample(prompts=prompts)
+        #images, h_vects = pipe(prompts, num_inference_steps=50, guidance_scale=7.5, return_dict=False)
+        images = outputs.x0
+        h_vects = outputs.hs
 
     for idx in range(len(images)):
         faces, _ = detect_faces([images[idx]], mtcnn)
@@ -61,7 +67,7 @@ def process_batch(args, prompts, pipe, fairface, accelerator, mtcnn):
             'image': images[idx],
             'prompt': prompts[idx],
             'occupation': get_occupation_from_prompt(prompts[idx]),
-            'h_vects': {ts: h_vects[ts][2*idx:2*idx+2].cpu().numpy() for ts in TIMESTEPS},
+            'h_vects': {int(ts): h_vects[idx][int(ts)].cpu().numpy() for ts in pipe.diff.timesteps},
             'face_detected': face is not None,
             'gender_scores': gender_scores
         })
@@ -114,11 +120,25 @@ def main():
 
     fairface = load_fairface_model(accelerator.device)
 
-    accelerator.print("Loading H-Diffusion model...")
+    accelerator.print("Loading Diffusion model...")
     model_id = args.model_id
-    pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if args.use_fp16 else th.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id).to(accelerator.device) 
+    scheduler = pipe.scheduler
 
-    pipe = pipe.to(accelerator.device)
+    pipe = StableSemanticDiffusion(
+        unet=ConditionalUnet(pipe.unet),
+        scheduler=DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False),
+        vae = pipe.vae,
+        tokenizer = pipe.tokenizer,
+        text_encoder = pipe.text_encoder,
+        image_processor = pipe.image_processor,
+        model_id = model_id,
+        num_inference_steps=50
+    )
+    
+    #pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if args.use_fp16 else th.float32)
+    #pipe = pipe.to(accelerator.device)
+    
     if not accelerator.is_main_process:
         pipe.set_progress_bar_config(disable=True)
 
@@ -144,9 +164,11 @@ def main():
         for i in tqdm(range(0, len(local_prompts), args.batch_size), desc="Processing batches", disable=not accelerator.is_main_process):
             batch_prompts = local_prompts[i:i+args.batch_size]
             batch_data = process_batch(args, batch_prompts, pipe, fairface, accelerator, mtcnn)
+            print(len(batch_data))
             data.extend(batch_data)
 
             # Save data periodically to free up memory
+            print(f"Items: {len(data)}")
             if len(data) >= args.save_interval:
                 rows, image_counter = save_data(output_path, data, accelerator, image_counter)
                 all_rows.extend(rows)
@@ -177,12 +199,12 @@ def main():
 def create_argparser():
     defaults = dict(
         num_samples=100,
-        batch_size=32,
+        batch_size=10,
         use_fp16=True,
         occupations_file="occupations.json",
         output_dir="output",
-        model_id="SG161222/Realistic_Vision_V2.0",
-        save_interval=1000,
+        model_id="runwayml/stable-diffusion-v1-5", #"SG161222/Realistic_Vision_V2.0",
+        save_interval=10,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():

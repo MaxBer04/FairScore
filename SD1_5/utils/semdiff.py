@@ -692,9 +692,9 @@ class StableDiffusion(Diffusion):
         assert len(etas) == self.num_inference_steps
 
         xt = xT
-        hs = torch.zeros(self.h_shape).to(self.device)
+        hs = {int(t): torch.zeros(self.h_shape).to(self.device) for t in self.timesteps}
         hs = [hs]*batch_size
-        self.timesteps = self.timesteps[:len(self.timesteps)-1]
+        #self.timesteps = self.timesteps[:len(self.timesteps)-1]
         op = tqdm(self.timesteps) if prog_bar else self.timesteps
         uncond_embedding = self.encode_text([""]*batch_size)
         
@@ -709,7 +709,7 @@ class StableDiffusion(Diffusion):
                                                encoder_hidden_states = uncond_embedding, delta_h = delta_h)
 
             for idx in range(len(hs)):
-              hs[idx] = uncond_out.h.squeeze()[idx]
+              hs[idx][t] = uncond_out.h.squeeze()[idx]
 
              ## Conditional embedding  
             if prompts:  
@@ -1040,11 +1040,12 @@ class SemanticDiffusion(Interpolations):
 
 class StableSemanticDiffusion(SemanticDiffusion):
 
-    def __init__(self, unet, scheduler, vae, tokenizer, text_encoder,  model_id = None, num_inference_steps = 50  ):
+    def __init__(self, unet, scheduler, vae, tokenizer, text_encoder, image_processor,  model_id = None, num_inference_steps = 50  ):
         self.img_size = 512
         self.device = unet.device
         self.unet = unet
         self.vae = vae
+        self.image_processor = image_processor
         self.is_vq = True
         self.is_conditional = True
         self.resize_to = 256
@@ -1066,7 +1067,8 @@ class StableSemanticDiffusion(SemanticDiffusion):
         with autocast("cuda"), inference_mode():
             #1 / 0.18215
             q.x0 = self.vae.decode(q.w0 / self.vae.config.scaling_factor).sample
-            q.x0 = (q.x0 / 2 + 0.5).clamp(0, 1)
+            q.x0 = self.image_processor.postprocess(q.x0, do_denormalize=[True]*q.x0.shape[0])
+            #q.x0 = (q.x0 / 2 + 0.5).clamp(0, 1)
         
         return q 
         

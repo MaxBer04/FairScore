@@ -7,7 +7,7 @@ from collections import Counter
 
 from utils.custom_pipe import HDiffusionPipeline
 from utils.semdiff import StableSemanticDiffusion, ConditionalUnet
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, DDIMScheduler
 
 def analyze_gender_predictions(probs_list, prompt_genders):
     probs = th.stack(probs_list)
@@ -103,18 +103,23 @@ def main():
   
     model_id = "SG161222/Realistic_Vision_V2.0"
     #pipe = HDiffusionPipeline.from_pretrained(model_id, torch_dtype=th.float16 if use_fp16 else th.float32)
-    pipe = StableDiffusionPipeline.from_pretrained(model_id).to(accelerator.device) #use_auth_token=True
+    pipe = StableDiffusionPipeline.from_pretrained(model_id).to(accelerator.device) 
     scheduler = pipe.scheduler
 
     pipe = StableSemanticDiffusion(
         unet=ConditionalUnet(pipe.unet),
-        scheduler=scheduler,#DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False),
+        scheduler=DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False),
         vae = pipe.vae,
         tokenizer = pipe.tokenizer,
         text_encoder = pipe.text_encoder,
         model_id = model_id,
         num_inference_steps=50
     )
+    
+    outputs = pipe.sample(prompts = ["A photo of the face of a technical education teacher"]*2)
+    save_image(outputs.x0, "x0.png")
+    print(len(outputs.hs))
+    print(outputs.hs[0].size())
     
     # Move the model to device before preparing
     #pipe = pipe.to(accelerator.device)
@@ -123,9 +128,6 @@ def main():
     
     #m_mult = 8
     #w_mult = 8
-    
-    outputs = pipe.sample(prompts = ["A photo of the face of a geoscientist"]*10)
-    save_image(outputs.x0, "x0.png")
 
     # Umwandlung der Bilder in Tensoren
     #tensor_images = [ToTensor()(img) for img in images]
