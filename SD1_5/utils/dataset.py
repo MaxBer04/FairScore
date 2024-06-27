@@ -28,7 +28,7 @@ def read_csv_with_commas(file_path, occupation):
     return prompts
 
 def extract_gender_tensor(prompt):
-    gender = re.search(r'{(male|female)}', prompt).group(1)
+    gender = re.search(r'\b(male|female)\b', prompt).group(1)
     high_value = random.uniform(0.9, 1.0)
     return th.tensor([high_value, 1 - high_value] if gender == 'male' else [1 - high_value, high_value])
 
@@ -57,10 +57,11 @@ class HVectsDataset(Dataset):
             gender_scores = extract_gender_tensor(metadata["prompt"])
         else:
             gender_scores = [float(score) for score in metadata['gender_scores'].split(',')]
+            th.tensor(gender_scores).float()
         
         return {
             'h_vects': {int(k): th.from_numpy(v).float() for k, v in h_vects.items()},
-            'gender_scores': th.tensor(gender_scores).float()
+            'gender_scores': gender_scores,
         }
 
 def create_data_loaders(dataset, batch_size, train_split=0.9):

@@ -52,7 +52,7 @@ def main():
         model.load_state_dict(new_state_dict)
     
 
-    dataset = HVectsDataset(args.data_dir)
+    dataset = HVectsDataset(args.data_dir, args.enable_hard_labels)
     train_loader, val_loader = create_data_loaders(dataset, args.batch_size, args.train_split)
 
     opt = th.optim.Adam(model.parameters(), lr=args.lr)
@@ -163,8 +163,9 @@ def create_argparser():
         train_split=0.8,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='/root/FairScore/model_71.pt',
+        resume_from_checkpoint='/root/FairScore/model_144.pt',
         combine_vectors=False,
+        enable_hard_labels=True,
     ))
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
