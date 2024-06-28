@@ -196,13 +196,13 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        num_samples=200,
-        batch_size=8,
+        num_samples=40,
+        batch_size=24,
         use_fp16=True,
         occupations_file="occupations.json",
-        output_dir="output",
+        output_dir="output_2",
         model_id="SG161222/Realistic_Vision_V2.0", #"runwayml/stable-diffusion-v1-5",
-        save_interval=16,
+        save_interval=48,
     )
     parser = argparse.ArgumentParser()
     for k, v in defaults.items():

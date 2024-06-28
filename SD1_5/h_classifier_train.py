@@ -151,19 +151,19 @@ def main():
 def create_argparser():
     defaults = classifier_and_diffusion_defaults()
     defaults.update(dict(
-        data_dir="output",
+        data_dir="8K_206occs_gender_hvecs",
         lr=1e-5,
-        batch_size=256,#8192*4,
+        batch_size=512+128,#8192*4,
         epochs=200,
         latents_size=8,
         out_channels=2,
-        in_channels=2560,
+        in_channels=1280,
         use_fp16=True,
         save_interval=1,
         train_split=0.8,
         wandb_project="h-vects-gender-classifier",
         wandb_name="hvects-gender-classifier",
-        resume_from_checkpoint='/root/FairScore/model_144.pt',
+        resume_from_checkpoint=None,
         combine_vectors=False,
         enable_hard_labels=True,
     ))

@@ -375,7 +375,7 @@ class Diffusion:
         pred_sample_direction = (1 - alpha_prod_t_prev - std_dev_t**2) ** (0.5) * model_output_direction
         # 7. compute x_t without "random noise" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
         prev_sample = alpha_prod_t_prev ** (0.5) * pred_original_sample + pred_sample_direction
-        # 8. Add noice if eta > 0
+        # 8. Add noise if eta > 0
         if eta > 0:
             if variance_noise is None:
                 variance_noise = torch.randn(model_output.shape, device=self.device)
@@ -702,14 +702,13 @@ class StableDiffusion(Diffusion):
             idx = self.t_to_idx[int(t)]        
             delta_h = None if delta_hs is None else delta_hs[idx][None]
            
-
             ## Unconditional embedding
             with torch.no_grad():
                 uncond_out = self.unet.forward(xt, timestep =  t, 
                                                encoder_hidden_states = uncond_embedding, delta_h = delta_h)
 
             for idx in range(len(hs)):
-              hs[idx][t] = uncond_out.h.squeeze()[idx]
+              hs[idx][int(t)] = uncond_out.h[idx]
 
              ## Conditional embedding  
             if prompts:  
